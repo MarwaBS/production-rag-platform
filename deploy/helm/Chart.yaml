@@ -1,0 +1,6 @@
+apiVersion: v2
+name: rag-platform
+description: Helm chart for the production RAG platform (sanitized template)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

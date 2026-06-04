@@ -1,0 +1,23 @@
+# Local development stack — sanitized; no secrets committed.
+# Secrets (e.g. OPENAI_API_KEY) are supplied via a local .env that is gitignored.
+services:
+  api:
+    build: ..
+    ports: ["8000:8000"]
+    environment:
+      - APP_ENV=dev
+      - REDIS_URL=redis://redis:6379/0
+    env_file: [.env]
+    depends_on: [redis]
+
+  worker:
+    build: ..
+    command: ["arq", "app.worker.WorkerSettings"]
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    env_file: [.env]
+    depends_on: [redis]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]

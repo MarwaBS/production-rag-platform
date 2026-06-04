@@ -1,0 +1,78 @@
+# CI/CD pipeline STRUCTURE (documentation).
+#
+# This file documents the multi-job GitHub Actions pipeline used by the production
+# system. It is kept under docs/ (not .github/workflows/) so it is shown for review
+# without executing against this documentation repository. No secrets appear in source;
+# credentials are injected via repository secrets and a Kubernetes Secret at deploy time.
+
+name: CI/CD
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install ruff mypy
+      - run: ruff check .
+      - run: mypy --strict app
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install bandit pip-audit
+      - run: bandit -r app -s B101
+      - run: pip-audit
+
+  test:
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -m "not integration" --cov=app --cov-fail-under=75
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: [test]
+    services:
+      redis: { image: redis:7-alpine, ports: ["6379:6379"] }
+    steps:
+      - uses: actions/checkout@v4
+      - run: pytest -m integration
+
+  evals:
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      # Golden-dataset evaluation gate — fails the build on a quality regression.
+      - run: python -m evals.gate
+
+  helm-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint deploy/helm
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f deploy/Dockerfile -t rag-platform:ci .
+      - name: Trivy image scan (HIGH/CRITICAL gate)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "rag-platform:ci"
+          severity: "HIGH,CRITICAL"
+          exit-code: "1"
