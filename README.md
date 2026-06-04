@@ -19,7 +19,10 @@ own input, served behind a typed API with full production infrastructure: contai
 Kubernetes-deployable, observable, and CI/CD-gated.
 
 ### ▶ Live demo — **[resumeforge-bg29.onrender.com](https://resumeforge-bg29.onrender.com)**
-*(Render free tier — the first request after idle cold-starts in ~30s.)*
+
+> **Note — hosted on a free tier: allow ~30 seconds on first load.** The service cold-starts
+> from idle, so the first request wakes the container. A slow first load is the host warming up,
+> not a broken app — refresh once and it responds immediately.
 
 > **What this repository is.** It documents the **architecture, deployment, and delivery
 > pipeline** of a system that runs in production (demo above). The application's evaluation
