@@ -1,5 +1,6 @@
 # Production RAG Platform
 
+[![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![OpenAI](https://img.shields.io/badge/LLM-OpenAI-412991?logo=openai&logoColor=white)
@@ -26,10 +27,12 @@ Kubernetes-deployable, observable, and CI/CD-gated.
 
 > **What this repository is.** It documents the **architecture, deployment, and delivery
 > pipeline** of a system that runs in production (demo above). The application's evaluation
-> algorithms and domain business logic are intentionally **not** published. The reusable
-> infrastructure layer — the vendor-neutral LLM-provider and vector-store abstractions —
-> *is* open-sourced, with runnable code and tests, at
-> **[rag-llm-infra](https://github.com/MarwaBS/rag-llm-infra)**.
+> algorithms and domain business logic are intentionally **not** published — but the parts you
+> *can* inspect are real: the reusable infrastructure layer (the vendor-neutral LLM-provider and
+> vector-store abstractions) is open-sourced with runnable code, tests, and green CI, and
+> **published on PyPI as [`rag-llm-infra`](https://pypi.org/project/rag-llm-infra/)**
+> (`pip install rag-llm-infra`); and the deployment config in this repo is **CI-validated**
+> (`helm lint` + render + Dockerfile `hadolint` — badge above).
 
 ## System overview
 
@@ -84,7 +87,10 @@ Full summaries in **[docs/decisions/](docs/decisions/)**:
 
 ## CI/CD
 
-Multi-job GitHub Actions pipeline — structure documented in **[docs/ci-cd-pipeline.yml](docs/ci-cd-pipeline.yml)**:
+**This repository's own CI** validates the deployment infrastructure on every push —
+`helm lint`, `helm template` render, and `hadolint` on the Dockerfile (CI badge at the top).
+
+The **production system's** full delivery pipeline is documented in **[docs/ci-cd-pipeline.yml](docs/ci-cd-pipeline.yml)**:
 
 ```
 lint → security scan → unit tests → integration tests → evaluation gate → helm-lint → image build + Trivy scan

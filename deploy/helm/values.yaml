@@ -1,3 +1,6 @@
+# Reference defaults for the production RAG platform Helm chart — override per
+# environment (image, host, resources). `helm lint` + `helm template` validate
+# this chart in CI on every push.
 replicaCount: 2
 
 image:

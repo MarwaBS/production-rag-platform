@@ -1,0 +1,31 @@
+name: CI
+
+# The application code is private; what is public here is the architecture + the
+# deployment infrastructure. This CI proves that infrastructure is valid — the Helm
+# chart lints and renders, and the Dockerfile passes hadolint — so the green badge
+# reflects real checks, not decoration.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate-iac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - name: Helm lint
+        run: helm lint deploy/helm
+
+      - name: Helm template (render check)
+        run: helm template release deploy/helm > /dev/null
+
+      - name: Lint Dockerfile (hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: deploy/Dockerfile
+          failure-threshold: error
