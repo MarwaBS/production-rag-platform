@@ -25,14 +25,27 @@ Kubernetes-deployable, observable, and CI/CD-gated.
 > from idle, so the first request wakes the container. A slow first load is the host warming up,
 > not a broken app — refresh once and it responds immediately.
 
-> **What this repository is.** It documents the **architecture, deployment, and delivery
-> pipeline** of a system that runs in production (demo above). The application's evaluation
-> algorithms and domain business logic are intentionally **not** published — but the parts you
-> *can* inspect are real: the reusable infrastructure layer (the vendor-neutral LLM-provider and
-> vector-store abstractions) is open-sourced with runnable code, tests, and green CI, and
-> **published on PyPI as [`rag-llm-infra`](https://pypi.org/project/rag-llm-infra/)**
-> (`pip install rag-llm-infra`); and the deployment config in this repo is **CI-validated**
-> (`helm lint` + render + Dockerfile `hadolint` — badge above).
+> **What this repository is.** A **runnable reference RAG service** (`app/`) built on the published
+> [`rag-llm-infra`](https://pypi.org/project/rag-llm-infra/) package — typed config, structured logging,
+> Prometheus metrics, liveness/readiness probes, an index/query API, integration tests, a Helm chart,
+> and a Dockerfile that builds — **plus** the architecture + ADRs for the production system whose demo
+> is linked above. The product's proprietary generation logic stays private; everything in *this* repo
+> is real, runs, and is CI-gated (image build · integration tests · Helm lint+render · hadolint — badge above).
+
+## Run the reference service
+
+```bash
+pip install -e .            # pulls rag-llm-infra from PyPI
+uvicorn app.main:app        # or: docker build -f deploy/Dockerfile -t prap . && docker run -p 8000:8000 prap
+```
+
+```bash
+curl -XPOST localhost:8000/index -d '{"documents":["FAISS vector search","Qdrant database"]}' -H 'content-type: application/json'
+curl -XPOST localhost:8000/query -d '{"query":"vector search","k":1}'                          -H 'content-type: application/json'
+curl localhost:8000/health    # liveness  ·  /ready readiness (503 until indexed)  ·  /metrics Prometheus
+```
+
+Runs on the NumPy vector store + Mock LLM with no API key. Set `APP_LLM_BACKEND=openai` + `OPENAI_API_KEY` for real generation.
 
 ## System overview
 

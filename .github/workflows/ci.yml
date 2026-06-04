@@ -1,9 +1,8 @@
 name: CI
 
-# The application code is private; what is public here is the architecture + the
-# deployment infrastructure. This CI proves that infrastructure is valid — the Helm
-# chart lints and renders, and the Dockerfile passes hadolint — so the green badge
-# reflects real checks, not decoration.
+# This repo is a runnable reference service built on the published rag-llm-infra
+# package, plus its deployment infrastructure. CI proves all of it: the service
+# installs + its integration tests pass, the image builds, and the IaC validates.
 
 on:
   push:
@@ -11,21 +10,39 @@ on:
   pull_request:
 
 jobs:
-  validate-iac:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - name: Install (pulls rag-llm-infra from PyPI)
+        run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check .
+      - name: Integration tests
+        run: pytest -q
 
+  iac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
-
-      - name: Helm lint
-        run: helm lint deploy/helm
-
-      - name: Helm template (render check)
-        run: helm template release deploy/helm > /dev/null
-
+      - name: Helm lint + render
+        run: |
+          helm lint deploy/helm
+          helm template release deploy/helm > /dev/null
       - name: Lint Dockerfile (hadolint)
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: deploy/Dockerfile
           failure-threshold: error
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -f deploy/Dockerfile -t production-rag-platform:ci .

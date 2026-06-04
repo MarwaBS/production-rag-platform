@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "production-rag-platform"
+version = "1.0.0"
+description = "Deployable reference RAG service built on the rag-llm-infra package: typed config, structured logging, Prometheus metrics, health/readiness probes, and an index/query API."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Marwa Ben Salem" }]
+dependencies = [
+  "rag-llm-infra>=0.1.0",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "prometheus-client>=0.20",
+  "pydantic-settings>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.6", "mypy>=1.11"]
+
+[project.urls]
+Homepage = "https://github.com/MarwaBS/production-rag-platform"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["F", "E"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["F401", "F841"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
