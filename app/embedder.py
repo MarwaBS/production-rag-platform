@@ -18,5 +18,9 @@ def embed(texts: List[str]) -> np.ndarray:
     vecs = np.zeros((len(texts), _DIM), dtype="float32")
     for row, text in enumerate(texts):
         for token in re.findall(r"[a-z0-9]+", text.lower()):
-            vecs[row, int(hashlib.md5(token.encode()).hexdigest(), 16) % _DIM] += 1.0
+            # md5 is a fast token->bucket hash here, not a security primitive;
+            # usedforsecurity=False makes the intent explicit and keeps this
+            # importable under FIPS-mode interpreters.
+            digest = hashlib.md5(token.encode(), usedforsecurity=False).hexdigest()
+            vecs[row, int(digest, 16) % _DIM] += 1.0
     return vecs
