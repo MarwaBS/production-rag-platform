@@ -1,14 +1,16 @@
 # syntax=docker/dockerfile:1
 # Multi-stage build of the reference service: installs the published rag-llm-infra
-# package + this app, runs non-root. `docker build` is exercised in CI on every push.
+# package + this app, runs non-root. Built, Trivy-scanned, and SBOM'd in CI on every
+# push. The base is pinned to a specific patch (3.12.8); for fully reproducible,
+# tamper-evident builds pin the digest instead (python:3.12.8-slim-bookworm@sha256:...).
 
-FROM python:3.12-slim-bookworm AS builder
+FROM python:3.12.8-slim-bookworm AS builder
 WORKDIR /build
 COPY pyproject.toml README.md ./
 COPY app ./app
 RUN pip install --no-cache-dir --prefix=/install .
 
-FROM python:3.12-slim-bookworm
+FROM python:3.12.8-slim-bookworm
 RUN useradd --create-home --uid 1000 appuser
 COPY --from=builder /install /usr/local
 USER appuser

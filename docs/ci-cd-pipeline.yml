@@ -1,9 +1,12 @@
-# CI/CD pipeline STRUCTURE (documentation).
+# CI/CD pipeline STRUCTURE — ILLUSTRATIVE DOCUMENTATION, NOT AN EXECUTED WORKFLOW.
 #
-# This file documents the multi-job GitHub Actions pipeline used by the production
-# system. It is kept under docs/ (not .github/workflows/) so it is shown for review
-# without executing against this documentation repository. No secrets appear in source;
-# credentials are injected via repository secrets and a Kubernetes Secret at deploy time.
+# This sketches the fuller pipeline of the PRIVATE production system (ResumeForge).
+# It is intentionally kept under docs/ (not .github/workflows/) so it never runs here,
+# and it references components that live in that private codebase — e.g.
+# requirements-dev.txt, an `evals` module + evaluation gate, integration-marked tests,
+# and mypy --strict — which are NOT part of this repository. This repo's real,
+# executed CI is .github/workflows/ci.yml (lint · mypy · tests · helm lint/render ·
+# hadolint · image build · Trivy scan · CycloneDX SBOM). No secrets appear in source.
 
 name: CI/CD
 

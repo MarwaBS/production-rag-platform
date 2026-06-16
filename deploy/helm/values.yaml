@@ -1,11 +1,22 @@
 # Reference defaults for the production RAG platform Helm chart — override per
 # environment (image, host, resources). `helm lint` + `helm template` validate
 # this chart in CI on every push.
-replicaCount: 2
+#
+# IMPORTANT — single replica by design. The reference service holds its document
+# index IN PROCESS (one vector store per pod, see app/main.py). A second pod would
+# start with an empty index until it received its OWN /index call, and /query
+# against it would return 409 "index documents first". Horizontal scale-out
+# therefore requires an external shared vector store (see
+# docs/decisions/001-faiss-over-managed-vector-db.md) and is intentionally out of
+# scope for this reference deployment — so replicaCount is 1 and autoscaling is off.
+replicaCount: 1
 
 image:
   repository: ghcr.io/marwabs/production-rag-platform
-  tag: latest
+  # Empty -> the Deployment pins the chart's appVersion (see deployment.yaml).
+  # Production should pin an immutable digest (repository@sha256:...) for
+  # reproducible, rollback-safe deploys rather than a moving tag.
+  tag: ""
   pullPolicy: IfNotPresent
 
 service:
@@ -21,14 +32,20 @@ resources:
     cpu: "1"
     memory: 512Mi
 
+# Disabled: the in-process index makes this service single-replica (see note
+# above). Enabling the HPA would spin up pods that each answer with an empty
+# index. Re-enable only alongside an external shared store.
 autoscaling:
-  enabled: true
-  minReplicas: 2
-  maxReplicas: 6
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 1
   targetCPUUtilizationPercentage: 70
 
+# Disabled for a single-replica workload: a PodDisruptionBudget with
+# minAvailable=1 over exactly one replica would permanently block voluntary node
+# drains (the node could never be cordoned for maintenance).
 podDisruptionBudget:
-  enabled: true
+  enabled: false
   minAvailable: 1
 
 ingress:
@@ -39,5 +56,6 @@ ingress:
 env:
   APP_ENV: production
 
-# Secrets (OPENAI_API_KEY, REDIS_URL, ...) are provided through a Kubernetes Secret,
-# never through values. See templates/secret.yaml for the referenced Secret name.
+# Secrets (e.g. OPENAI_API_KEY for the openai backend, APP_API_KEY to guard
+# /index) are provided through a Kubernetes Secret, never through values. See
+# templates/secret.yaml for the referenced Secret name.
