@@ -124,6 +124,23 @@ def test_concurrent_reindex_and_query_never_5xx() -> None:
     assert not errors, f"saw 5xx responses under concurrency: {errors}"
 
 
+def test_deployment_app_env_values_are_valid() -> None:
+    """Guard config/deployment drift: every APP_ENV the deploy files set must be
+    a valid Settings.env value. A 'dev' typo in docker-compose.yml used to crash
+    the service at import once env became a Literal."""
+    import pathlib
+    import re
+
+    from app.config import Settings
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    files = [root / "deploy" / "docker-compose.yml", root / "deploy" / "helm" / "values.yaml"]
+    values = [m for f in files for m in re.findall(r"APP_ENV[:=]\s*([A-Za-z_]+)", f.read_text())]
+    assert values, "expected APP_ENV declarations in the deploy files"
+    for val in values:
+        Settings(env=val)  # raises pydantic ValidationError if not a valid Literal
+
+
 def test_index_requires_api_key_when_configured(monkeypatch) -> None:
     monkeypatch.setattr(main.settings, "api_key", "s3cret")
     assert client.post("/index", json={"documents": ["x doc"]}).status_code == 401

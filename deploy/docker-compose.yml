@@ -7,5 +7,5 @@ services:
       dockerfile: deploy/Dockerfile
     ports: ["8000:8000"]
     environment:
-      - APP_ENV=dev
+      - APP_ENV=development
       - APP_LLM_BACKEND=mock
