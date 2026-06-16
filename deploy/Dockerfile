@@ -11,7 +11,14 @@ COPY app ./app
 RUN pip install --no-cache-dir --prefix=/install .
 
 FROM python:3.12.8-slim-bookworm
-RUN useradd --create-home --uid 1000 appuser
+# Apply Debian security updates so the shipped image doesn't carry fixable
+# HIGH/CRITICAL OS-package CVEs (gnutls, openssl, sqlite, pam, ...). The Trivy
+# gate in CI fails the build on any fixable HIGH/CRITICAL, so this is enforced.
+# hadolint ignore=DL3005
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 1000 appuser
 COPY --from=builder /install /usr/local
 USER appuser
 EXPOSE 8000
