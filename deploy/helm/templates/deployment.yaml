@@ -20,7 +20,7 @@ spec:
         runAsUser: 1000
       containers:
         - name: api
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.service.targetPort }}
@@ -32,6 +32,12 @@ spec:
               value: {{ .Values.env.APP_ENV | quote }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          # Readiness targets /health (process up), NOT /ready. The index is
+          # populated at runtime via POST /index, so gating pod readiness on
+          # /ready (503-until-indexed) would deadlock: the Service would route
+          # no traffic to an un-indexed pod, so it could never receive the
+          # /index call that makes it ready. /ready is an app-level signal for
+          # clients to poll, exposed by the API but intentionally not the probe.
           readinessProbe:
             httpGet:
               path: /health

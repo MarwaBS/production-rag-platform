@@ -37,5 +37,16 @@ ignore = ["E501"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["F401", "F841"]
 
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+
+# rag-llm-infra ships no py.typed marker yet, so mypy can't see its types.
+# Scope the missing-imports allowance to that package only — everything else
+# stays strictly checked.
+[[tool.mypy.overrides]]
+module = ["rag_llm_infra.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 addopts = "-ra"

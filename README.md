@@ -5,10 +5,8 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![OpenAI](https://img.shields.io/badge/LLM-OpenAI-412991?logo=openai&logoColor=white)
 ![FAISS](https://img.shields.io/badge/Retrieval-FAISS%20%2F%20Qdrant-0467DF)
-![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-Helm-326CE5?logo=kubernetes&logoColor=white)
-![OpenTelemetry](https://img.shields.io/badge/Observability-OpenTelemetry-425CC7?logo=opentelemetry&logoColor=white)
 ![Prometheus](https://img.shields.io/badge/Metrics-Prometheus-E6522C?logo=prometheus&logoColor=white)
 ![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub_Actions-2088FF?logo=githubactions&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
@@ -19,18 +17,24 @@ A retrieval-augmented generation platform that grounds every generated claim in 
 own input, served behind a typed API with full production infrastructure: containerized,
 Kubernetes-deployable, observable, and CI/CD-gated.
 
-### ▶ Live demo — **[resumeforge-bg29.onrender.com](https://resumeforge-bg29.onrender.com)**
+> **What this repository is — read this first.** This repo is a **runnable reference RAG
+> service** (`app/`) built on the published [`rag-llm-infra`](https://pypi.org/project/rag-llm-infra/)
+> package: typed config, structured logging, Prometheus metrics, liveness/readiness probes, an
+> index/query API with auth + input validation, integration tests, a Helm chart, and a Dockerfile
+> that builds. Everything in *this* repo is real, runs, and is CI-gated (image build + Trivy scan ·
+> integration tests · Helm lint+render · hadolint · CycloneDX SBOM — badge above).
+>
+> It **also** documents, as architecture + ADRs, the design of a separate **private** product
+> (ResumeForge) that the reference service's patterns were drawn from. That product's proprietary
+> generation logic is not in this repo. Sections marked _“full system”_ describe that private
+> architecture — **not** code in this repository — so you can tell exactly what runs here from what
+> is design context.
 
-> **Note — hosted on a free tier: allow ~30 seconds on first load.** The service cold-starts
-> from idle, so the first request wakes the container. A slow first load is the host warming up,
-> not a broken app — refresh once and it responds immediately.
+### ▶ Live demo of the **private product** (ResumeForge, a separate codebase) — **[resumeforge-bg29.onrender.com](https://resumeforge-bg29.onrender.com)**
 
-> **What this repository is.** A **runnable reference RAG service** (`app/`) built on the published
-> [`rag-llm-infra`](https://pypi.org/project/rag-llm-infra/) package — typed config, structured logging,
-> Prometheus metrics, liveness/readiness probes, an index/query API, integration tests, a Helm chart,
-> and a Dockerfile that builds — **plus** the architecture + ADRs for the production system whose demo
-> is linked above. The product's proprietary generation logic stays private; everything in *this* repo
-> is real, runs, and is CI-gated (image build · integration tests · Helm lint+render · hadolint — badge above).
+> This links the deployed ResumeForge product, **not** this reference service. This repo's service
+> is meant to be run locally (below); it is not the thing hosted at that URL. Free tier — allow ~30s
+> on first load while the container wakes.
 
 ## Run the reference service
 
@@ -47,7 +51,28 @@ curl localhost:8000/health    # liveness  ·  /ready readiness (503 until indexe
 
 Runs on the NumPy vector store + Mock LLM with no API key. Set `APP_LLM_BACKEND=openai` + `OPENAI_API_KEY` for real generation.
 
-## System overview
+## What this reference service implements (in this repo)
+
+The runnable `app/` service:
+
+- `POST /index` — build a vector store from documents and swap it in atomically
+  (corpus-replace; optional `X-API-Key` when `APP_API_KEY` is set).
+- `POST /query` — retrieve top-k and generate a grounded answer (Mock LLM by
+  default, or OpenAI via `APP_LLM_BACKEND=openai`).
+- `GET /health` — liveness · `GET /ready` — app-level "is a corpus indexed?"
+  (503 until indexed) · `GET /metrics` — Prometheus.
+- Typed config (pydantic-settings, validated), structured logging, input
+  validation, single-replica Helm chart, multi-stage non-root Docker image.
+
+Retrieval backend is NumPy by default (`faiss`/`qdrant` available via extras).
+
+## System overview — full production architecture (the private system)
+
+> The diagram and the two tables below describe the **full private product's**
+> architecture, for design context. Components not listed under "What this
+> reference service implements" above (Redis cache, arq workers, OpenTelemetry
+> tracing, semantic validation, PDF output, rate limiting) live in that private
+> codebase, **not** in this repo.
 
 ```mermaid
 flowchart LR
@@ -61,27 +86,25 @@ flowchart LR
   API -. traces / metrics .-> OBS[OpenTelemetry · Prometheus]
 ```
 
-## Components
-
-| Component | Responsibility | Stack |
-|---|---|---|
-| **API gateway** | Typed request/response, authentication, rate limiting | FastAPI, Pydantic v2, slowapi |
-| **Retrieval** | Grounds generation in the user's own evidence | FAISS / Qdrant, SentenceTransformers |
-| **Generation** | Vendor-neutral model calls behind a protocol | OpenAI, LLM-provider abstraction |
-| **Validation** | Flags generated claims not supported by the input | semantic-similarity checks |
-| **State** | Caching, daily cost ceiling, async jobs | Redis, arq |
-| **Observability** | Distributed traces, metrics, structured logs | OpenTelemetry, Prometheus |
-| **Delivery** | Image build, K8s deploy, CI/CD | Docker, Helm, GitHub Actions |
-
-*Descriptions are intentionally architectural — the implementation is private.*
+| Component | Responsibility | Stack | In this repo |
+|---|---|---|---|
+| **API gateway** | Typed request/response, API-key auth, validation | FastAPI, Pydantic v2 | ✅ (rate limiting: private) |
+| **Retrieval** | Grounds generation in the user's own evidence | FAISS / Qdrant, SentenceTransformers | ✅ (NumPy default; FAISS/Qdrant via extras) |
+| **Generation** | Vendor-neutral model calls behind a protocol | OpenAI, LLM-provider abstraction | ✅ (via `rag-llm-infra`) |
+| **Validation** | Flags generated claims not supported by the input | semantic-similarity checks | ◻ private |
+| **State** | Caching, daily cost ceiling, async jobs | Redis, arq | ◻ private |
+| **Observability** | Metrics + structured logs (traces: private) | Prometheus; OpenTelemetry | ✅ metrics + logs · ◻ traces |
+| **Delivery** | Image build + scan, SBOM, K8s deploy, CI/CD | Docker, Helm, GitHub Actions, Trivy, CycloneDX | ✅ |
 
 ## Tech stack
 
-**Service:** Python 3.12 · FastAPI · Pydantic v2 · Uvicorn · slowapi
-**LLM / RAG:** OpenAI API · FAISS / Qdrant · SentenceTransformers · vendor-neutral LLM protocol
-**State & async:** Redis · arq
-**Observability:** OpenTelemetry (traces) · Prometheus (metrics) · structured JSON logs
-**Delivery:** multi-stage Docker (non-root, Trivy-scanned) · Helm / Kubernetes · GitHub Actions · CycloneDX SBOM
+**In this repo (real, runs, CI-gated):** Python 3.12 · FastAPI · Pydantic v2 ·
+Uvicorn · `rag-llm-infra` (NumPy / FAISS / Qdrant · vendor-neutral LLM protocol ·
+OpenAI optional) · Prometheus metrics · structured JSON logs · multi-stage Docker
+(non-root, Trivy-scanned) · Helm / Kubernetes · GitHub Actions · CycloneDX SBOM.
+
+**Full system only (private architecture, not in this repo):** Redis · arq ·
+OpenTelemetry traces · slowapi rate limiting · semantic validation · PDF output.
 
 ## Architecture decisions
 
@@ -94,20 +117,20 @@ Full summaries in **[docs/decisions/](docs/decisions/)**:
 
 ## Deployment
 
-- **Container** — multi-stage `python:3.12-slim-bookworm`, runs as a non-root user, Trivy-scanned: **[deploy/Dockerfile](deploy/Dockerfile)**.
-- **Orchestration** — Helm chart with Deployment / Service / HPA / PodDisruptionBudget / Ingress / ServiceAccount and a Secret-backed config: **[deploy/helm/](deploy/helm/)**.
-- **Runtime** — auto-deploys to a managed container host on merge to `main` (the live demo above).
+- **Container** — multi-stage `python:3.12.8-slim-bookworm`, runs as a non-root user, Trivy-scanned in CI: **[deploy/Dockerfile](deploy/Dockerfile)**.
+- **Orchestration** — single-replica Helm chart (Deployment / Service / Ingress / ServiceAccount / Secret; HPA + PDB templates ship but are disabled by default because the index is in-process — see [values.yaml](deploy/helm/values.yaml)): **[deploy/helm/](deploy/helm/)**.
+- **Image publishing** — on merge to `main`, CI builds the image and pushes `:latest` and a commit-SHA tag to GHCR. This repo does **not** auto-deploy anywhere; the live demo above is the separate ResumeForge product.
 
 ## CI/CD
 
-**This repository's own CI** validates the deployment infrastructure on every push —
-`helm lint`, `helm template` render, and `hadolint` on the Dockerfile (CI badge at the top).
+**This repository's own CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push and PR:
+`ruff` lint · `mypy` · `pytest` integration tests · `helm lint` + `helm template` render · `hadolint` on the
+Dockerfile · Docker image build · **Trivy** image scan · **CycloneDX SBOM** generation (uploaded as an artifact).
+On merge to `main` it also pushes the scanned image to GHCR.
 
-The **production system's** full delivery pipeline is documented in **[docs/ci-cd-pipeline.yml](docs/ci-cd-pipeline.yml)**:
-
-```
-lint → security scan → unit tests → integration tests → evaluation gate → helm-lint → image build + Trivy scan
-```
+The **private production system's** fuller pipeline (unit/integration split, an evaluation gate, etc.) is
+sketched for reference in **[docs/ci-cd-pipeline.yml](docs/ci-cd-pipeline.yml)** — an illustrative document,
+not an executed workflow in this repo.
 
 No secrets live in source; credentials are injected via repository secrets and a Kubernetes Secret.
 
