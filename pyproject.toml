@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Marwa Ben Salem" }]
 dependencies = [
-  "rag-llm-infra>=0.1.0",
+  "rag-llm-infra>=0.1.1",
   "fastapi>=0.115",
   "uvicorn>=0.30",
   "prometheus-client>=0.20",
