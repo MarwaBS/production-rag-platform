@@ -52,6 +52,16 @@ ingress:
   enabled: true
   className: nginx
   host: rag-platform.example.com
+  # TLS is OFF by default (the reference chart ships no cert). The template ties
+  # nginx `ssl-redirect` to this: forcing ssl-redirect WITHOUT a cert produces a
+  # 308 redirect to an HTTPS endpoint that can't complete the handshake — a
+  # redirect loop. When enabled, the template emits spec.tls (referencing
+  # `secretName`) AND, if set, a cert-manager `cluster-issuer` annotation to
+  # provision that secret, alongside ssl-redirect="true".
+  tls:
+    enabled: false
+    secretName: rag-platform-tls
+    clusterIssuer: ""  # e.g. "letsencrypt-prod"; empty omits the annotation
 
 env:
   APP_ENV: production

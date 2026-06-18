@@ -43,6 +43,14 @@ class _Index:
     a re-index could pair a new store with stale docs (or vice versa) and raise
     IndexError. A single reference makes that torn read impossible by
     construction.
+
+    Atomicity caveat: the lock-free swap relies on a single name rebind being
+    atomic, which holds under CPython's GIL (the supported runtime here, and the
+    reference deployment is single-replica/single-process anyway). On a
+    free-threaded build (PEP 703, Python 3.13+ `--disable-gil`) a rebind is no
+    longer guaranteed atomic against a concurrent read; a multi-process or
+    free-threaded deployment should guard the swap with a lock (or move the
+    corpus to a shared external store).
     """
 
     docs: tuple[str, ...]
@@ -125,27 +133,33 @@ def index(req: IndexRequest, _: None = Depends(require_api_key)) -> Dict[str, in
 def query(req: QueryRequest) -> Any:
     _REQUESTS.labels("query").inc()
     start = time.perf_counter()
-    snapshot = _index  # single atomic read — docs and store are always consistent
-    if snapshot is None:
-        # Query before any corpus exists is a client error, not a 200 with an
-        # error key buried in the body.
-        return JSONResponse(
-            {"error": "index documents first", "retrieved": [], "answer": ""},
-            status_code=409,
+    # Observe latency on EVERY exit path (success, 409, or a raised error) in a
+    # finally — not only on the success tail. Otherwise the histogram silently
+    # excludes the 409 "not indexed" and error paths, understating real latency
+    # and hiding a slow failure mode.
+    try:
+        snapshot = _index  # single atomic read — docs and store are always consistent
+        if snapshot is None:
+            # Query before any corpus exists is a client error, not a 200 with an
+            # error key buried in the body.
+            return JSONResponse(
+                {"error": "index documents first", "retrieved": [], "answer": ""},
+                status_code=409,
+            )
+        docs, store = snapshot.docs, snapshot.store
+        _, idx = store.search(embed([req.query]), k=min(req.k, len(docs)))
+        retrieved = [docs[int(i)] for i in idx[0] if i >= 0]
+        context = "\n".join(f"- {d}" for d in retrieved)
+        if settings.llm_backend == "mock":
+            llm = get_llm("mock", response=lambda _m: f"(answer grounded in {len(retrieved)} retrieved docs)")
+        else:
+            llm = get_llm(settings.llm_backend)
+        answer = llm.invoke(
+            [
+                {"role": "system", "content": "Answer using ONLY the provided context."},
+                {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {req.query}"},
+            ]
         )
-    docs, store = snapshot.docs, snapshot.store
-    _, idx = store.search(embed([req.query]), k=min(req.k, len(docs)))
-    retrieved = [docs[int(i)] for i in idx[0] if i >= 0]
-    context = "\n".join(f"- {d}" for d in retrieved)
-    if settings.llm_backend == "mock":
-        llm = get_llm("mock", response=lambda _m: f"(answer grounded in {len(retrieved)} retrieved docs)")
-    else:
-        llm = get_llm(settings.llm_backend)
-    answer = llm.invoke(
-        [
-            {"role": "system", "content": "Answer using ONLY the provided context."},
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {req.query}"},
-        ]
-    )
-    _QUERY_LATENCY.observe(time.perf_counter() - start)
-    return {"retrieved": retrieved, "answer": answer}
+        return {"retrieved": retrieved, "answer": answer}
+    finally:
+        _QUERY_LATENCY.observe(time.perf_counter() - start)

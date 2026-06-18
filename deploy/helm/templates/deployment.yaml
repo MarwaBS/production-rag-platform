@@ -18,12 +18,28 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: api
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Restricted container hardening (Pod Security Standards "restricted"):
+          # no privilege escalation, an immutable root filesystem, and all Linux
+          # capabilities dropped. The app writes nothing to the root fs (in-memory
+          # NumPy store, stdout logging), so /tmp is the only writable mount it
+          # needs — backed by an emptyDir below.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: {{ .Values.service.targetPort }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           envFrom:
             - secretRef:
                 name: {{ .Release.Name }}-secrets
@@ -48,3 +64,7 @@ spec:
               path: /health
               port: {{ .Values.service.targetPort }}
             initialDelaySeconds: 20
+      volumes:
+        # Writable scratch for the read-only-root container (Python/uvicorn temp).
+        - name: tmp
+          emptyDir: {}
