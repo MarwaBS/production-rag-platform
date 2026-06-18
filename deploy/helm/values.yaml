@@ -67,5 +67,13 @@ env:
   APP_ENV: production
 
 # Secrets (e.g. OPENAI_API_KEY for the openai backend, APP_API_KEY to guard
-# /index) are provided through a Kubernetes Secret, never through values. See
-# templates/secret.yaml for the referenced Secret name.
+# /index) are provided through a Kubernetes Secret, never through values.
+secrets:
+  # By default the chart renders an (empty) Secret so a bare `helm install` works
+  # in mock mode. For REAL secrets, manage the Secret OUT OF BAND (kubectl create
+  # secret / sealed-secret / external-secrets) and set `create: false` —
+  # otherwise every `helm upgrade` resets the Secret's data to what's templated
+  # here, clobbering the out-of-band values. See templates/secret.yaml.
+  create: true
+  # base64-encoded key/values, dev/test only — NEVER commit real secrets here:
+  data: {}
