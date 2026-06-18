@@ -4,9 +4,24 @@ kind: Ingress
 metadata:
   name: {{ .Release.Name }}
   annotations:
+    {{- if .Values.ingress.tls.enabled }}
+    # ssl-redirect only makes sense WITH a cert to redirect to — tied to tls.enabled
+    # so an HTTP->HTTPS redirect is never forced against a host that has no cert.
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    {{- with .Values.ingress.tls.clusterIssuer }}
+    cert-manager.io/cluster-issuer: {{ . | quote }}
+    {{- end }}
+    {{- else }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
   rules:
     - host: {{ .Values.ingress.host }}
       http:

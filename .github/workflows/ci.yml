@@ -23,7 +23,7 @@ jobs:
       - name: Lint
         run: ruff check .
       - name: Type-check
-        run: mypy app
+        run: mypy app tests
       - name: Integration tests
         run: pytest -q
 
@@ -62,7 +62,9 @@ jobs:
           load: true
           tags: ${{ env.IMAGE }}:ci
       - name: Trivy image scan (fail on fixable HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@master
+        # Pinned to a release tag (not @master) so a scanner change can't silently
+        # alter the gate, matching the rest of the pinned actions in this file.
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:ci
           format: table

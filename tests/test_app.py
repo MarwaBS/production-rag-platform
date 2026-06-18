@@ -64,6 +64,22 @@ def test_query_before_index_returns_409() -> None:
     assert r.json()["error"] == "index documents first"
 
 
+def test_query_409_path_is_observed_in_latency_histogram() -> None:
+    """Regression: latency was observed only on the success tail, so the 409
+    "not indexed" path (and errors) never entered the histogram, understating
+    real latency. The observe() now runs in a finally, so a 409 must bump the
+    histogram's count."""
+    from prometheus_client import REGISTRY
+
+    def _count() -> float:
+        return REGISTRY.get_sample_value("rag_query_latency_seconds_count") or 0.0
+
+    before = _count()
+    r = client.post("/query", json={"query": "anything"})  # 409 — no index
+    assert r.status_code == 409
+    assert _count() == before + 1.0, "409 path must be recorded in the latency histogram"
+
+
 def test_index_rejects_empty_documents_422() -> None:
     r = client.post("/index", json={"documents": []})
     assert r.status_code == 422
