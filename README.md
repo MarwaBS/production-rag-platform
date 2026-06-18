@@ -77,7 +77,7 @@ Retrieval backend is NumPy by default (`faiss`/`qdrant` available via extras).
 ```mermaid
 flowchart LR
   U[Client] --> API[FastAPI service<br/>Pydantic v2 · auth · rate limit]
-  API --> RET[Retrieval layer<br/>FAISS / Qdrant]
+  API --> RET[Retrieval layer<br/>NumPy default · FAISS / Qdrant]
   RET --> GEN[Grounded generation<br/>LLM-provider abstraction]
   GEN --> VAL[Semantic validation<br/>flags unsupported claims]
   VAL --> OUT[Structured output + PDF]
