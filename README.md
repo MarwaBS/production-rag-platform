@@ -17,24 +17,20 @@ A retrieval-augmented generation platform that grounds every generated claim in 
 own input, served behind a typed API with full production infrastructure: containerized,
 Kubernetes-deployable, observable, and CI/CD-gated.
 
-> **What this repository is — read this first.** This repo is a **runnable reference RAG
-> service** (`app/`) built on the published [`rag-llm-infra`](https://pypi.org/project/rag-llm-infra/)
-> package: typed config, structured logging, Prometheus metrics, liveness/readiness probes, an
-> index/query API with auth + input validation, integration tests, a Helm chart, and a Dockerfile
-> that builds. Everything in *this* repo is real, runs, and is CI-gated (image build + Trivy scan ·
-> integration tests · Helm lint+render · hadolint · CycloneDX SBOM — badge above).
+> **What runs here vs. what's design context** — the one thing to get straight:
 >
-> It **also** documents, as architecture + ADRs, the design of a separate **private** product
-> (ResumeForge) that the reference service's patterns were drawn from. That product's proprietary
-> generation logic is not in this repo. Sections marked _“full system”_ describe that private
-> architecture — **not** code in this repository — so you can tell exactly what runs here from what
-> is design context.
+> | | Runs in this repo (`app/`) | Design context only |
+> |---|---|---|
+> | **What** | A runnable reference RAG service on the published [`rag-llm-infra`](https://pypi.org/project/rag-llm-infra/) package | ADRs + the "full system" diagram for a separate **private** product (ResumeForge) |
+> | **Includes** | typed config · auth + input validation · `/index` `/query` `/health` `/ready` `/metrics` · structured logs · Helm chart · Dockerfile | Redis cache · arq workers · OTel tracing · semantic validation · PDF output · rate limiting |
+> | **Status** | real, runs locally, **CI-gated** (image build + Trivy · integration tests · Helm lint+render · hadolint · SBOM) | the proprietary generation logic is **not** in this repo |
+>
+> Sections below are labelled _"full system"_ when they describe the private architecture, so you
+> can always tell what executes here from what's design context.
 
-### ▶ Live demo of the **private product** (ResumeForge, a separate codebase) — **[resumeforge-bg29.onrender.com](https://resumeforge-bg29.onrender.com)**
-
-> This links the deployed ResumeForge product, **not** this reference service. This repo's service
-> is meant to be run locally (below); it is not the thing hosted at that URL. Free tier — allow ~30s
-> on first load while the container wakes.
+**Run it in 30 seconds** — [jump to quickstart](#run-the-reference-service). The private product
+ResumeForge is live at **[resumeforge-bg29.onrender.com](https://resumeforge-bg29.onrender.com)**
+(a separate codebase — *not* this service; free tier, ~30s cold start).
 
 ## Run the reference service
 
