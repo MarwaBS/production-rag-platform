@@ -1,3 +1,13 @@
+## What this is
+
+A production RAG platform that grounds every generated claim in verified source documents — because hallucination in production costs real money.
+
+**[Live demo](https://resumeforge-bg29.onrender.com)** · **[Open infrastructure: rag-llm-infra](https://pypi.org/project/rag-llm-infra/)**
+
+Stack: FastAPI · LangChain · Redis · FAISS/Qdrant · Kubernetes · Helm · OpenTelemetry · Prometheus
+
+---
+
 # Production RAG Platform
 
 [![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
