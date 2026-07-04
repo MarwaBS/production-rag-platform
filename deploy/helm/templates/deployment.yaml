@@ -44,8 +44,13 @@ spec:
             - secretRef:
                 name: {{ .Release.Name }}-secrets
           env:
-            - name: APP_ENV
-              value: {{ .Values.env.APP_ENV | quote }}
+            # Render every key under .Values.env (sorted, so the output is
+            # deterministic) — hardcoding a single key here is how ENV=prod
+            # (the rag-llm-infra JSON-log switch) silently never shipped.
+            {{- range $name, $value := .Values.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           # Readiness targets /health (process up), NOT /ready. The index is

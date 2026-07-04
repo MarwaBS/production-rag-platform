@@ -13,9 +13,13 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/marwabs/production-rag-platform
-  # Empty -> the Deployment pins the chart's appVersion (see deployment.yaml).
-  # Production should pin an immutable digest (repository@sha256:...) for
-  # reproducible, rollback-safe deploys rather than a moving tag.
+  # Tag strategy — CI pushes THREE tags to GHCR on every merge to main:
+  #   :latest, :<commit-sha>, and :<appVersion> (from Chart.yaml).
+  # Empty tag -> the Deployment falls back to the chart's appVersion, which CI
+  # publishes precisely so a bare `helm install` resolves an image that exists.
+  # Both :latest and :<appVersion> are MUTABLE (re-stamped on every main merge);
+  # production should pin the immutable :<commit-sha>, or better a digest
+  # (repository@sha256:...), for reproducible, rollback-safe deploys.
   tag: ""
   pullPolicy: IfNotPresent
 
@@ -64,7 +68,13 @@ ingress:
     clusterIssuer: ""  # e.g. "letsencrypt-prod"; empty omits the annotation
 
 env:
+  # APP_ENV drives the app's own typed settings (app/config.py, APP_-prefixed).
   APP_ENV: production
+  # ENV is a SEPARATE knob consumed by the rag-llm-infra package: its logging
+  # config keys the single-line-JSON formatter on ENV=prod (not APP_ENV), so
+  # without this the deployed pod would emit human-readable dev logs and the
+  # "structured JSON logs" claim would be dead in the shipped deploy.
+  ENV: prod
 
 # Secrets (e.g. OPENAI_API_KEY for the openai backend, APP_API_KEY to guard
 # /index) are provided through a Kubernetes Secret, never through values.

@@ -1,0 +1,14 @@
+# Dev/CI toolchain pins, applied via `pip install -c` (see .github/workflows/ci.yml).
+#
+# pyproject.toml declares only minimums for the dev tools, so without this file
+# every CI run floats to the latest ruff/mypy/pytest release — a new tool version
+# could break main with zero repo changes. Constraints keep the gate
+# deterministic; bump them deliberately (and watch CI) instead.
+#
+# Runtime dependencies are intentionally NOT pinned here: the package is a
+# reference service installed with range requirements, and the Docker image /
+# SBOM capture the exact runtime versions actually shipped.
+ruff==0.15.20
+mypy==2.1.0
+pytest==9.1.1
+httpx==0.28.1
