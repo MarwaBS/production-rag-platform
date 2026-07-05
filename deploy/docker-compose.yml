@@ -9,3 +9,7 @@ services:
     environment:
       - APP_ENV=development
       - APP_LLM_BACKEND=mock
+      # ENV is deliberately NOT set here: rag-llm-infra keys its single-line
+      # JSON log formatter on ENV=prod, and this compose file is the local dev
+      # stack where human-readable logs are wanted. The Helm chart (the prod
+      # deploy) sets ENV=prod — see deploy/helm/values.yaml.

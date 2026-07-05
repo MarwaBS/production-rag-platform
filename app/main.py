@@ -12,7 +12,11 @@ generation.
 """
 from __future__ import annotations
 
+import logging
+import secrets
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
@@ -29,7 +33,30 @@ from .embedder import embed
 settings = get_settings()
 configure_logging(settings.log_level)
 
-app = FastAPI(title="production-rag-platform", version="1.0.0")
+# Emitted through rag-llm-infra's logging config: human-readable in dev,
+# single-line JSON when the process runs with ENV=prod (the Helm deploy does).
+logger = logging.getLogger("app.main")
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Startup config summary — the one line an operator needs to confirm WHAT
+    # is actually running (backends, auth posture) from the logs alone.
+    logger.info(
+        "service started",
+        extra={
+            "app_env": settings.env,
+            "llm_backend": settings.llm_backend,
+            "vector_backend": settings.vector_backend,
+            "default_top_k": settings.default_top_k,
+            "index_auth_enabled": bool(settings.api_key),
+        },
+    )
+    yield
+    logger.info("service stopping")
+
+
+app = FastAPI(title="production-rag-platform", version="1.0.0", lifespan=_lifespan)
 
 
 @dataclass(frozen=True)
@@ -69,8 +96,17 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
     Unset (the default) leaves /index open for the no-auth local/demo run. When
     set, /index requires a matching X-API-Key header — /index REPLACES the
     entire corpus, so it must not be world-writable in a shared deployment.
+
+    The comparison is constant-time (secrets.compare_digest over the encoded
+    bytes): a plain equality check short-circuits at the first differing byte,
+    leaking a timing signal about how much of a guessed key prefix matched.
+    Encoding to bytes also keeps a non-ASCII header value from raising inside
+    compare_digest.
     """
-    if settings.api_key and x_api_key != settings.api_key:
+    if not settings.api_key:
+        return
+    supplied = (x_api_key or "").encode()
+    if not secrets.compare_digest(supplied, settings.api_key.encode()):
         raise HTTPException(status_code=401, detail="invalid or missing API key")
 
 
@@ -126,6 +162,11 @@ def index(req: IndexRequest, _: None = Depends(require_api_key)) -> Dict[str, in
     store.add(embed(list(req.documents)))
     global _index
     _index = _Index(docs=tuple(req.documents), store=store)
+    # Counts only — document CONTENT never goes to the logs.
+    logger.info(
+        "corpus indexed",
+        extra={"documents": len(req.documents), "vector_backend": settings.vector_backend},
+    )
     return {"indexed": len(req.documents)}
 
 
@@ -159,6 +200,12 @@ def query(req: QueryRequest) -> Any:
                 {"role": "system", "content": "Answer using ONLY the provided context."},
                 {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {req.query}"},
             ]
+        )
+        # Counts only — the query text itself (potential PII) never goes to
+        # the logs.
+        logger.info(
+            "query answered",
+            extra={"retrieved": len(retrieved), "k": req.k, "llm_backend": settings.llm_backend},
         )
         return {"retrieved": retrieved, "answer": answer}
     finally:

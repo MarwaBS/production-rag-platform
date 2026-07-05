@@ -1,10 +1,10 @@
 ## What this is
 
-A production RAG platform that grounds every generated claim in verified source documents — because hallucination in production costs real money.
+A deployable reference RAG service that grounds every generated answer in the caller's own documents — served behind a typed API and shipped with the full production envelope: containerized, Kubernetes-deployable, observable, CI-gated.
 
-**[Live demo](https://resumeforge-bg29.onrender.com)** · **[Open infrastructure: rag-llm-infra](https://pypi.org/project/rag-llm-infra/)**
+**[Open infrastructure: rag-llm-infra](https://pypi.org/project/rag-llm-infra/)** (the published package this service runs on) · the private flagship product built on the same design, ResumeForge, is [live here](https://resumeforge-bg29.onrender.com) (separate codebase — see the boundary table below)
 
-Stack: FastAPI · LangChain · Redis · FAISS/Qdrant · Kubernetes · Helm · OpenTelemetry · Prometheus
+Stack: FastAPI · rag-llm-infra · NumPy retrieval (FAISS/Qdrant optional) · Prometheus · structured JSON logs · Docker · Kubernetes/Helm · GitHub Actions
 
 ---
 
@@ -125,7 +125,7 @@ Full summaries in **[docs/decisions/](docs/decisions/)**:
 
 - **Container** — multi-stage `python:3.12.8-slim-bookworm`, runs as a non-root user, Trivy-scanned in CI: **[deploy/Dockerfile](deploy/Dockerfile)**.
 - **Orchestration** — single-replica Helm chart (Deployment / Service / Ingress / ServiceAccount / Secret; HPA + PDB templates ship but are disabled by default because the index is in-process — see [values.yaml](deploy/helm/values.yaml)): **[deploy/helm/](deploy/helm/)**.
-- **Image publishing** — on merge to `main`, CI builds the image and pushes `:latest` and a commit-SHA tag to GHCR. This repo does **not** auto-deploy anywhere; the live demo above is the separate ResumeForge product.
+- **Image publishing** — on merge to `main`, CI builds the image and pushes `:latest`, a commit-SHA tag, and the chart's `appVersion` tag (so a bare `helm install` resolves an image that exists) to GHCR. This repo does **not** auto-deploy anywhere; the live demo above is the separate ResumeForge product.
 
 ## CI/CD
 

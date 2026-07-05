@@ -18,8 +18,10 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
-      - name: Install (pulls rag-llm-infra from PyPI)
-        run: pip install -e ".[dev]"
+      - name: Install (pulls rag-llm-infra from PyPI; dev toolchain pinned)
+        # constraints-dev.txt pins ruff/mypy/pytest so a tool release can't
+        # break main with zero repo changes.
+        run: pip install -e ".[dev]" -c constraints-dev.txt
       - name: Lint
         run: ruff check .
       - name: Type-check
@@ -90,7 +92,17 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Push scanned image to GHCR (latest + commit SHA)
+      - name: Read chart appVersion (the tag a bare `helm install` resolves)
+        # The Deployment defaults image.tag to .Chart.AppVersion, so that tag
+        # MUST exist on GHCR or a default install ImagePullBackOffs. Deriving it
+        # here from the same Chart.yaml keeps CI and the chart in lockstep.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: chart
+        run: |
+          v="$(awk -F'"' '/^appVersion:/ {print $2}' deploy/helm/Chart.yaml)"
+          test -n "$v"  # fail loudly rather than pushing a malformed empty tag
+          echo "app_version=$v" >> "$GITHUB_OUTPUT"
+      - name: Push scanned image to GHCR (latest + commit SHA + chart appVersion)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
@@ -100,3 +112,4 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:${{ steps.chart.outputs.app_version }}
