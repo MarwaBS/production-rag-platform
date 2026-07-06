@@ -277,3 +277,85 @@ def test_helm_deploy_activates_json_logging() -> None:
     assert "range $name, $value := .Values.env" in deployment, (
         "Deployment must render ALL of .Values.env, not a hardcoded key"
     )
+
+
+def test_uvicorn_loggers_emit_json_under_prod(monkeypatch) -> None:
+    """Regression: under ENV=prod the app logger emits single-line JSON, but
+    uvicorn keeps its OWN plain-text handlers on the uvicorn / uvicorn.access
+    loggers with propagate=False (and uvicorn.error's records bubble to
+    uvicorn's plain handler and stop there) — so ALL uvicorn.* lines stay plain
+    text while app lines are JSON. Prod stdout was therefore a MIX of formats,
+    which breaks log ingestion and contradicts the README's structured-logging
+    claim. Every uvicorn.* logger must emit through the root JSON handler."""
+    import io
+    import json
+    import logging
+    import logging.config
+
+    import uvicorn.config as uv_config
+    from rag_llm_infra.log_config import _JsonFormatter
+
+    monkeypatch.setenv("ENV", "prod")
+
+    root = logging.getLogger()
+    saved_root_handlers = root.handlers[:]
+    buf = io.StringIO()
+    capture = logging.StreamHandler(buf)
+    capture.setFormatter(_JsonFormatter())  # stand in for the prod JSON root handler
+    root.handlers = [capture]
+
+    uv_names = ("uvicorn", "uvicorn.access", "uvicorn.error")
+    saved_uv = {
+        n: (logging.getLogger(n).handlers[:], logging.getLogger(n).propagate) for n in uv_names
+    }
+    try:
+        # Install uvicorn's REAL default logging (plain handlers, propagate=False).
+        logging.config.dictConfig(uv_config.LOGGING_CONFIG)
+
+        # Precondition (the bug): a uvicorn line never reaches the JSON root handler.
+        logging.getLogger("uvicorn").info("startup line")
+        assert buf.getvalue() == "", "uvicorn logs must currently bypass the JSON root handler"
+
+        main._route_uvicorn_logs_through_json()
+
+        # After the fix every uvicorn.* logger emits a single JSON line via root.
+        for name in uv_names:
+            buf.seek(0)
+            buf.truncate(0)
+            logging.getLogger(name).info("line from %s", name)
+            out = buf.getvalue().strip()
+            assert out, f"{name} produced no output through the root JSON handler"
+            record = json.loads(out)  # must be a single valid JSON object
+            assert record["logger"] == name
+            assert record["msg"] == f"line from {name}"
+    finally:
+        root.handlers = saved_root_handlers
+        for n, (handlers, propagate) in saved_uv.items():
+            lg = logging.getLogger(n)
+            lg.handlers = handlers
+            lg.propagate = propagate
+
+
+def test_auth_failure_increments_auth_counter_not_request_counter(monkeypatch) -> None:
+    """Regression: a rejected (401) request was invisible to metrics — only
+    authenticated/served requests bumped a counter. A bad key must bump the
+    dedicated rag_auth_failures_total counter and must NOT be counted as a
+    served request in rag_requests_total."""
+    from prometheus_client import REGISTRY
+
+    monkeypatch.setattr(main.settings, "api_key", "s3cret")
+
+    def _auth_failures() -> float:
+        return REGISTRY.get_sample_value("rag_auth_failures_total") or 0.0
+
+    def _index_served() -> float:
+        return REGISTRY.get_sample_value("rag_requests_total", {"endpoint": "index"}) or 0.0
+
+    auth_before = _auth_failures()
+    served_before = _index_served()
+    r = client.post("/index", json={"documents": ["x doc"]}, headers={"X-API-Key": "wrong"})
+    assert r.status_code == 401
+    assert _auth_failures() == auth_before + 1.0, "a 401 must bump rag_auth_failures_total"
+    assert _index_served() == served_before, (
+        "a rejected request must not count as a served /index in rag_requests_total"
+    )

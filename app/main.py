@@ -13,6 +13,7 @@ generation.
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 import time
 from collections.abc import AsyncIterator
@@ -38,8 +39,41 @@ configure_logging(settings.log_level)
 logger = logging.getLogger("app.main")
 
 
+def _route_uvicorn_logs_through_json() -> None:
+    """Under ENV=prod, make uvicorn's OWN loggers emit the same single-line JSON
+    as the app logger, so prod stdout is one uniform format.
+
+    rag-llm-infra installs its JSON formatter on the ROOT logger (keyed on the
+    ENV=prod env var — the Helm deploy sets it), but uvicorn installs its own
+    plain-text handlers on the `uvicorn` / `uvicorn.access` loggers with
+    ``propagate=False``. A record on `uvicorn.error` even bubbles up to
+    `uvicorn`'s plain handler and STOPS there (uvicorn.propagate is False), so
+    ALL THREE uvicorn loggers emit plain text while the app logger emits JSON —
+    prod stdout ends up a MIX of the two formats, which breaks log ingestion and
+    contradicts the README's structured-logging claim.
+
+    Clearing uvicorn's handlers and re-enabling propagation routes every
+    uvicorn.* record up to the root JSON handler, so prod logs are uniform JSON.
+    Gated on the exact condition rag-llm-infra keys its JSON formatter on
+    (ENV=prod); in dev the root handler is human-readable and uvicorn's default
+    formatting is left untouched.
+    """
+    if os.getenv("ENV", "dev").lower() != "prod":
+        return
+    for name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
+        uv_logger = logging.getLogger(name)
+        uv_logger.handlers.clear()
+        uv_logger.propagate = True
+
+
 @asynccontextmanager
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Unify log format BEFORE the first startup line: under ENV=prod, route
+    # uvicorn's own loggers through the root JSON handler so operators don't get
+    # a mix of JSON (app) and plain-text (uvicorn) lines on stdout. Runs here
+    # (server startup) so it takes effect after uvicorn has installed its own
+    # logging config, regardless of how the app was launched.
+    _route_uvicorn_logs_through_json()
     # Startup config summary — the one line an operator needs to confirm WHAT
     # is actually running (backends, auth posture) from the logs alone.
     logger.info(
@@ -87,6 +121,12 @@ class _Index:
 _index: _Index | None = None
 
 _REQUESTS = Counter("rag_requests_total", "Total API requests", ["endpoint"])
+# Rejected (401) requests never reach a route body, so they are invisible to
+# rag_requests_total. Count them separately so bad/missing-credential traffic is
+# observable (alert on auth-failure spikes) instead of silently dropped.
+_AUTH_FAILURES = Counter(
+    "rag_auth_failures_total", "Requests rejected for a missing/invalid API key (HTTP 401)"
+)
 _QUERY_LATENCY = Histogram("rag_query_latency_seconds", "Query latency in seconds")
 
 
@@ -107,6 +147,10 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
         return
     supplied = (x_api_key or "").encode()
     if not secrets.compare_digest(supplied, settings.api_key.encode()):
+        # Count the rejection BEFORE raising: the dependency short-circuits the
+        # route body, so rag_requests_total never sees this request — without a
+        # dedicated counter, 401s would be invisible to metrics.
+        _AUTH_FAILURES.inc()
         raise HTTPException(status_code=401, detail="invalid or missing API key")
 
 
