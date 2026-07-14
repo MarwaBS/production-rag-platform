@@ -52,8 +52,16 @@ podDisruptionBudget:
   enabled: false
   minAvailable: 1
 
+# DISABLED by default — secure default. Enabling this publishes the service to
+# the internet through an nginx Ingress. The data-plane (/index, /query) is only
+# authenticated when APP_API_KEY is set (see app/main.py); an unauthenticated
+# pod behind a public Ingress lets anyone replace the corpus and spend LLM
+# budget. Opt in deliberately (ingress.enabled=true) and ONLY together with:
+#   1. APP_API_KEY provided via the Secret (secrets.data), so /index + /query
+#      require X-API-Key, and
+#   2. tls.enabled=true with a real cert (set clusterIssuer for cert-manager).
 ingress:
-  enabled: true
+  enabled: false
   className: nginx
   host: rag-platform.example.com
   # TLS is OFF by default (the reference chart ships no cert). The template ties

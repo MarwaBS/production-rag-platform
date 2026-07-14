@@ -3,6 +3,7 @@
 Reproducible bag-of-tokens hashing. Production swaps this for
 `rag_llm_infra.EmbeddingEngine` (real sentence embeddings).
 """
+
 from __future__ import annotations
 
 import hashlib
