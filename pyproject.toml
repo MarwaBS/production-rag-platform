@@ -19,6 +19,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Non-default backends. The base install ships only the NumPy store + Mock LLM;
+# these extras pull the matching flavor of rag-llm-infra so the advertised
+# `APP_LLM_BACKEND=openai` / `APP_VECTOR_BACKEND=faiss|qdrant` modes are actually
+# installable (`pip install production-rag-platform[openai]`). app.main fails
+# fast at startup if a selected backend's package is missing.
+openai = ["rag-llm-infra[openai]>=0.1.1"]
+faiss = ["rag-llm-infra[faiss]>=0.1.1"]
+qdrant = ["rag-llm-infra[qdrant]>=0.1.1"]
 dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.6", "mypy>=1.11"]
 
 [project.urls]

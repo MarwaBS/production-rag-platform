@@ -24,10 +24,14 @@ jobs:
         run: pip install -e ".[dev]" -c constraints-dev.txt
       - name: Lint
         run: ruff check .
+      - name: Format check
+        run: ruff format --check .
       - name: Type-check
-        run: mypy app tests
+        run: mypy app evals tests
       - name: Integration tests
         run: pytest -q
+      - name: Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)
+        run: python -m evals
 
   iac:
     runs-on: ubuntu-latest

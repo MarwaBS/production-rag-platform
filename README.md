@@ -62,9 +62,13 @@ Runs on the NumPy vector store + Mock LLM with no API key. Set `APP_LLM_BACKEND=
 The runnable `app/` service:
 
 - `POST /index` — build a vector store from documents and swap it in atomically
-  (corpus-replace; optional `X-API-Key` when `APP_API_KEY` is set).
+  (corpus-replace).
 - `POST /query` — retrieve top-k and generate a grounded answer (Mock LLM by
   default, or OpenAI via `APP_LLM_BACKEND=openai`).
+- **Auth** — when `APP_API_KEY` is set, both `/index` and `/query` require a
+  matching `X-API-Key` header (the data-plane: corpus writes and reads/LLM
+  spend). The probes `/health`, `/ready`, `/metrics` stay open. Unset by
+  default for the no-auth local/demo run.
 - `GET /health` — liveness · `GET /ready` — app-level "is a corpus indexed?"
   (503 until indexed) · `GET /metrics` — Prometheus.
 - Typed config (pydantic-settings, validated), structured logging, input
@@ -124,19 +128,22 @@ Full summaries in **[docs/decisions/](docs/decisions/)**:
 ## Deployment
 
 - **Container** — multi-stage `python:3.12.8-slim-bookworm`, runs as a non-root user, Trivy-scanned in CI: **[deploy/Dockerfile](deploy/Dockerfile)**.
-- **Orchestration** — single-replica Helm chart (Deployment / Service / Ingress / ServiceAccount / Secret; HPA + PDB templates ship but are disabled by default because the index is in-process — see [values.yaml](deploy/helm/values.yaml)): **[deploy/helm/](deploy/helm/)**.
+- **Orchestration** — single-replica Helm chart (Deployment / Service / Ingress / ServiceAccount / Secret; HPA + PDB templates ship but are disabled by default because the index is in-process — see [values.yaml](deploy/helm/values.yaml)): **[deploy/helm/](deploy/helm/)**. The **Ingress is disabled by default** (secure default): a bare install exposes nothing publicly. Opt in with `ingress.enabled=true` only alongside `APP_API_KEY` (so `/index` + `/query` require a key) and `tls.enabled=true` with a real cert.
 - **Image publishing** — on merge to `main`, CI builds the image and pushes `:latest`, a commit-SHA tag, and the chart's `appVersion` tag (so a bare `helm install` resolves an image that exists) to GHCR. This repo does **not** auto-deploy anywhere; the live demo above is the separate ResumeForge product.
 
 ## CI/CD
 
 **This repository's own CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push and PR:
-`ruff` lint · `mypy` · `pytest` integration tests · `helm lint` + `helm template` render · `hadolint` on the
+`ruff` lint · `mypy` · `pytest` integration tests · a **retrieval eval gate** ([`evals/`](evals/) — recall@k
+over a fixed Q/gold set through the real embed+store+retrieve path, floored in [`tests/test_eval.py`](tests/test_eval.py)
+so a retrieval regression fails the build) · `helm lint` + `helm template` render · `hadolint` on the
 Dockerfile · Docker image build · **Trivy** image scan · **CycloneDX SBOM** generation (uploaded as an artifact).
 On merge to `main` it also pushes the scanned image to GHCR.
 
-The **private production system's** fuller pipeline (unit/integration split, an evaluation gate, etc.) is
-sketched for reference in **[docs/ci-cd-pipeline.yml](docs/ci-cd-pipeline.yml)** — an illustrative document,
-not an executed workflow in this repo.
+The eval here is a *retrieval*-quality gate (the shipped Mock LLM makes generation a fixed template). The
+**private production system's** fuller pipeline (LLM answer-quality / golden-dataset evaluation, unit/integration
+split, etc.) is sketched for reference in **[docs/ci-cd-pipeline.yml](docs/ci-cd-pipeline.yml)** — an
+illustrative document, not an executed workflow in this repo.
 
 No secrets live in source; credentials are injected via repository secrets and a Kubernetes Secret.
 

@@ -10,8 +10,10 @@ generation.
 
     uvicorn app.main:app
 """
+
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
 import secrets
@@ -28,10 +30,41 @@ from pydantic import BaseModel, Field
 
 from rag_llm_infra import configure_logging, get_llm, get_vector_store
 
-from .config import get_settings
+from .config import Settings, get_settings
 from .embedder import embed
 
 settings = get_settings()
+
+
+def _require_backend_packages(s: Settings) -> None:
+    """Fail fast at startup when a selected non-default backend isn't installed.
+
+    The base install ships only the NumPy vector store + Mock LLM; openai / faiss
+    / qdrant live in optional extras (see pyproject). Without this check a
+    misconfiguration (e.g. ``APP_LLM_BACKEND=openai`` on a base install) would
+    surface as a 500 on the FIRST /query — get_llm / get_vector_store import the
+    SDK lazily inside the request. Checking importability at boot (find_spec, no
+    live credential needed) turns that into an immediate, actionable startup
+    failure carrying the exact `pip install …[extra]` fix.
+    """
+    checks = (
+        ("APP_LLM_BACKEND", s.llm_backend, "openai", "openai", "openai"),
+        ("APP_VECTOR_BACKEND", s.vector_backend, "faiss", "faiss", "faiss"),
+        ("APP_VECTOR_BACKEND", s.vector_backend, "qdrant", "qdrant_client", "qdrant"),
+    )
+    for env_var, selected, backend, module, extra in checks:
+        if selected == backend and importlib.util.find_spec(module) is None:
+            raise RuntimeError(
+                f"{env_var}={backend} requires the optional '{extra}' extra, which is "
+                f"not installed. Run `pip install 'production-rag-platform[{extra}]'` "
+                f"or use the default backend (mock LLM / numpy store)."
+            )
+
+
+# Validate the configured backends are importable before the app serves a single
+# request — a misconfigured deploy dies at boot with the fix, not mid-query.
+_require_backend_packages(settings)
+
 configure_logging(settings.log_level)
 
 # Emitted through rag-llm-infra's logging config: human-readable in dev,
@@ -66,13 +99,21 @@ def _route_uvicorn_logs_through_json() -> None:
         uv_logger.propagate = True
 
 
+# Route uvicorn's loggers through the root JSON handler AT IMPORT TIME (under
+# ENV=prod). uvicorn's launch order is: configure_logging() (installs uvicorn's
+# plain handlers) -> import the app module (this line runs here) -> log "Started
+# server process" / "Waiting for application startup." Rerouting at import
+# therefore lands BEFORE those two banner lines, so they emit as JSON too —
+# doing it only in the lifespan (below) left those first two prod-boot lines
+# plain text, breaking strict-JSON ingestion on every restart.
+_route_uvicorn_logs_through_json()
+
+
 @asynccontextmanager
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
-    # Unify log format BEFORE the first startup line: under ENV=prod, route
-    # uvicorn's own loggers through the root JSON handler so operators don't get
-    # a mix of JSON (app) and plain-text (uvicorn) lines on stdout. Runs here
-    # (server startup) so it takes effect after uvicorn has installed its own
-    # logging config, regardless of how the app was launched.
+    # Belt-and-suspenders: also reroute at lifespan startup, covering launch
+    # paths where the app module is imported before uvicorn installs its logging
+    # config (so the import-time call above was a no-op). Idempotent.
     _route_uvicorn_logs_through_json()
     # Startup config summary — the one line an operator needs to confirm WHAT
     # is actually running (backends, auth posture) from the logs alone.
@@ -83,7 +124,7 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
             "llm_backend": settings.llm_backend,
             "vector_backend": settings.vector_backend,
             "default_top_k": settings.default_top_k,
-            "index_auth_enabled": bool(settings.api_key),
+            "auth_enabled": bool(settings.api_key),
         },
     )
     yield
@@ -125,17 +166,22 @@ _REQUESTS = Counter("rag_requests_total", "Total API requests", ["endpoint"])
 # rag_requests_total. Count them separately so bad/missing-credential traffic is
 # observable (alert on auth-failure spikes) instead of silently dropped.
 _AUTH_FAILURES = Counter(
-    "rag_auth_failures_total", "Requests rejected for a missing/invalid API key (HTTP 401)"
+    "rag_auth_failures_total",
+    "Requests rejected for a missing/invalid API key (HTTP 401)",
 )
 _QUERY_LATENCY = Histogram("rag_query_latency_seconds", "Query latency in seconds")
 
 
 def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
-    """Guard the destructive /index write when APP_API_KEY is configured.
+    """Guard the API's data-plane (/index and /query) when APP_API_KEY is configured.
 
-    Unset (the default) leaves /index open for the no-auth local/demo run. When
-    set, /index requires a matching X-API-Key header — /index REPLACES the
-    entire corpus, so it must not be world-writable in a shared deployment.
+    Unset (the default) leaves both open for the no-auth local/demo run. When
+    set, /index AND /query require a matching X-API-Key header: /index REPLACES
+    the entire corpus (must not be world-writable in a shared deployment), and
+    /query reads that corpus back and spends LLM budget on every call — leaving
+    it open while guarding /index would let anyone exfiltrate the indexed
+    documents and burn the model allowance. The probes (/health, /ready,
+    /metrics) stay open so liveness checks and Prometheus scraping need no key.
 
     The comparison is constant-time (secrets.compare_digest over the encoded
     bytes): a plain equality check short-circuits at the first differing byte,
@@ -209,13 +255,16 @@ def index(req: IndexRequest, _: None = Depends(require_api_key)) -> Dict[str, in
     # Counts only — document CONTENT never goes to the logs.
     logger.info(
         "corpus indexed",
-        extra={"documents": len(req.documents), "vector_backend": settings.vector_backend},
+        extra={
+            "documents": len(req.documents),
+            "vector_backend": settings.vector_backend,
+        },
     )
     return {"indexed": len(req.documents)}
 
 
 @app.post("/query")
-def query(req: QueryRequest) -> Any:
+def query(req: QueryRequest, _: None = Depends(require_api_key)) -> Any:
     _REQUESTS.labels("query").inc()
     start = time.perf_counter()
     # Observe latency on EVERY exit path (success, 409, or a raised error) in a
@@ -236,20 +285,35 @@ def query(req: QueryRequest) -> Any:
         retrieved = [docs[int(i)] for i in idx[0] if i >= 0]
         context = "\n".join(f"- {d}" for d in retrieved)
         if settings.llm_backend == "mock":
-            llm = get_llm("mock", response=lambda _m: f"(answer grounded in {len(retrieved)} retrieved docs)")
+            llm = get_llm(
+                "mock",
+                response=lambda _m: (
+                    f"(answer grounded in {len(retrieved)} retrieved docs)"
+                ),
+            )
         else:
             llm = get_llm(settings.llm_backend)
         answer = llm.invoke(
             [
-                {"role": "system", "content": "Answer using ONLY the provided context."},
-                {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {req.query}"},
+                {
+                    "role": "system",
+                    "content": "Answer using ONLY the provided context.",
+                },
+                {
+                    "role": "user",
+                    "content": f"Context:\n{context}\n\nQuestion: {req.query}",
+                },
             ]
         )
         # Counts only — the query text itself (potential PII) never goes to
         # the logs.
         logger.info(
             "query answered",
-            extra={"retrieved": len(retrieved), "k": req.k, "llm_backend": settings.llm_backend},
+            extra={
+                "retrieved": len(retrieved),
+                "k": req.k,
+                "llm_backend": settings.llm_backend,
+            },
         )
         return {"retrieved": retrieved, "answer": answer}
     finally:

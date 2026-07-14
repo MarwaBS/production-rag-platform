@@ -5,6 +5,7 @@ handle: readiness before indexing, query-before-index, input validation
 (empty corpus, non-positive k), corpus-replace semantics, the re-index
 torn-read regression, and optional API-key auth on the destructive write.
 """
+
 import threading
 
 import pytest
@@ -42,18 +43,25 @@ def test_ready_503_before_index() -> None:
 
 
 def test_ready_true_after_index() -> None:
-    client.post("/index", json={"documents": ["faiss vector search", "qdrant database"]})
+    client.post(
+        "/index", json={"documents": ["faiss vector search", "qdrant database"]}
+    )
     r = client.get("/ready")
     assert r.status_code == 200
     assert r.json()["ready"] is True
 
 
 def test_index_then_query_grounds_answer() -> None:
-    docs = ["FAISS in-process vector similarity search", "Qdrant vector database with gRPC"]
+    docs = [
+        "FAISS in-process vector similarity search",
+        "Qdrant vector database with gRPC",
+    ]
     r = client.post("/index", json={"documents": docs})
     assert r.status_code == 201
     assert r.json() == {"indexed": 2}
-    body = client.post("/query", json={"query": "vector similarity search", "k": 1}).json()
+    body = client.post(
+        "/query", json={"query": "vector similarity search", "k": 1}
+    ).json()
     assert body["retrieved"] == ["FAISS in-process vector similarity search"]
     assert "grounded" in body["answer"]
 
@@ -77,7 +85,9 @@ def test_query_409_path_is_observed_in_latency_histogram() -> None:
     before = _count()
     r = client.post("/query", json={"query": "anything"})  # 409 — no index
     assert r.status_code == 409
-    assert _count() == before + 1.0, "409 path must be recorded in the latency histogram"
+    assert _count() == before + 1.0, (
+        "409 path must be recorded in the latency histogram"
+    )
 
 
 def test_index_rejects_empty_documents_422() -> None:
@@ -91,7 +101,9 @@ def test_query_rejects_nonpositive_k_422() -> None:
     client.post("/index", json={"documents": ["a doc about vectors"]})
     for bad_k in (0, -2):
         r = client.post("/query", json={"query": "vectors", "k": bad_k})
-        assert r.status_code == 422, f"k={bad_k} should be rejected, got {r.status_code}"
+        assert r.status_code == 422, (
+            f"k={bad_k} should be rejected, got {r.status_code}"
+        )
 
 
 def test_index_replaces_corpus_not_additive() -> None:
@@ -105,7 +117,10 @@ def test_reindex_with_smaller_corpus_never_500s() -> None:
     # Replace a large corpus with a smaller one and immediately query. The
     # atomic snapshot guarantees docs and store always match, so retrieved
     # indices never exceed the current doc list.
-    client.post("/index", json={"documents": [f"doc number {i} about vectors" for i in range(20)]})
+    client.post(
+        "/index",
+        json={"documents": [f"doc number {i} about vectors" for i in range(20)]},
+    )
     client.post("/index", json={"documents": ["only one doc about vectors"]})
     r = client.post("/query", json={"query": "vectors", "k": 5})
     assert r.status_code == 200
@@ -123,7 +138,9 @@ def test_concurrent_reindex_and_query_never_5xx() -> None:
     def reindexer() -> None:
         for i in range(40):
             n = 1 if i % 2 else 10
-            client.post("/index", json={"documents": [f"d{j} vectors" for j in range(n)]})
+            client.post(
+                "/index", json={"documents": [f"d{j} vectors" for j in range(n)]}
+            )
 
     def querier() -> None:
         for _ in range(40):
@@ -150,8 +167,15 @@ def test_deployment_app_env_values_are_valid() -> None:
     from app.config import Settings
 
     root = pathlib.Path(__file__).resolve().parent.parent
-    files = [root / "deploy" / "docker-compose.yml", root / "deploy" / "helm" / "values.yaml"]
-    values = [m for f in files for m in re.findall(r"APP_ENV[:=]\s*([A-Za-z_]+)", f.read_text())]
+    files = [
+        root / "deploy" / "docker-compose.yml",
+        root / "deploy" / "helm" / "values.yaml",
+    ]
+    values = [
+        m
+        for f in files
+        for m in re.findall(r"APP_ENV[:=]\s*([A-Za-z_]+)", f.read_text())
+    ]
     assert values, "expected APP_ENV declarations in the deploy files"
     for val in values:
         Settings(env=val)  # raises pydantic ValidationError if not a valid Literal
@@ -161,7 +185,9 @@ def test_index_requires_api_key_when_configured(monkeypatch) -> None:
     monkeypatch.setattr(main.settings, "api_key", "s3cret")
     assert client.post("/index", json={"documents": ["x doc"]}).status_code == 401
     assert (
-        client.post("/index", json={"documents": ["x doc"]}, headers={"X-API-Key": "wrong"}).status_code
+        client.post(
+            "/index", json={"documents": ["x doc"]}, headers={"X-API-Key": "wrong"}
+        ).status_code
         == 401
     )
     # A non-ASCII guess must be a clean 401, not a 500 — the constant-time
@@ -176,9 +202,49 @@ def test_index_requires_api_key_when_configured(monkeypatch) -> None:
         == 401
     )
     assert (
-        client.post("/index", json={"documents": ["x doc"]}, headers={"X-API-Key": "s3cret"}).status_code
+        client.post(
+            "/index", json={"documents": ["x doc"]}, headers={"X-API-Key": "s3cret"}
+        ).status_code
         == 201
     )
+
+
+def test_query_requires_api_key_when_configured(monkeypatch) -> None:
+    """When APP_API_KEY is set, /query (a read that touches the corpus and
+    spends LLM budget) must require the key too — not only the destructive
+    /index write. A shared deployment that guards /index but leaves /query open
+    lets anyone read the indexed corpus and burn the LLM allowance."""
+    monkeypatch.setattr(main.settings, "api_key", "s3cret")
+    # Seed a corpus (with the key) so a served /query would be a 200 — proving
+    # the 401 below is auth, not the empty-index 409.
+    assert (
+        client.post(
+            "/index",
+            json={"documents": ["a doc about vectors"]},
+            headers={"X-API-Key": "s3cret"},
+        ).status_code
+        == 201
+    )
+    assert client.post("/query", json={"query": "vectors", "k": 1}).status_code == 401
+    assert (
+        client.post(
+            "/query", json={"query": "vectors", "k": 1}, headers={"X-API-Key": "wrong"}
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/query", json={"query": "vectors", "k": 1}, headers={"X-API-Key": "s3cret"}
+        ).status_code
+        == 200
+    )
+
+
+def test_query_open_when_no_api_key_configured() -> None:
+    """The no-auth local/demo default is preserved: with no APP_API_KEY set,
+    /query needs no header."""
+    client.post("/index", json={"documents": ["a doc about vectors"]})
+    assert client.post("/query", json={"query": "vectors", "k": 1}).status_code == 200
 
 
 def test_api_key_comparison_is_constant_time() -> None:
@@ -203,14 +269,16 @@ def test_startup_emits_structured_config_summary(caplog) -> None:
         with TestClient(app):
             pass
     started = [
-        r for r in caplog.records if r.name == "app.main" and r.getMessage() == "service started"
+        r
+        for r in caplog.records
+        if r.name == "app.main" and r.getMessage() == "service started"
     ]
     assert started, "expected a 'service started' INFO record on startup"
     record = started[0]
     # The summary must carry the config an operator needs, as structured fields.
     assert getattr(record, "llm_backend") == main.settings.llm_backend
     assert getattr(record, "vector_backend") == main.settings.vector_backend
-    assert getattr(record, "index_auth_enabled") == bool(main.settings.api_key)
+    assert getattr(record, "auth_enabled") == bool(main.settings.api_key)
 
 
 def test_index_and_query_emit_count_logs(caplog) -> None:
@@ -222,8 +290,49 @@ def test_index_and_query_emit_count_logs(caplog) -> None:
         client.post("/index", json={"documents": ["a doc about vectors"]})
         client.post("/query", json={"query": "vectors", "k": 1})
     by_msg = {r.getMessage(): r for r in caplog.records if r.name == "app.main"}
-    assert "corpus indexed" in by_msg and getattr(by_msg["corpus indexed"], "documents") == 1
-    assert "query answered" in by_msg and getattr(by_msg["query answered"], "retrieved") == 1
+    assert (
+        "corpus indexed" in by_msg
+        and getattr(by_msg["corpus indexed"], "documents") == 1
+    )
+    assert (
+        "query answered" in by_msg
+        and getattr(by_msg["query answered"], "retrieved") == 1
+    )
+
+
+def test_nondefault_backend_without_extra_fails_fast() -> None:
+    """A selected non-default backend whose package isn't installed must fail at
+    STARTUP with the exact install hint — not defer to a 500 on the first /query.
+    openai/faiss/qdrant are optional extras; the base/dev env installs none of
+    them, so selecting one here must raise a clear RuntimeError."""
+    from app.config import Settings
+
+    with pytest.raises(RuntimeError, match=r"production-rag-platform\[openai\]"):
+        main._require_backend_packages(Settings(llm_backend="openai"))
+    with pytest.raises(RuntimeError, match=r"production-rag-platform\[qdrant\]"):
+        main._require_backend_packages(Settings(vector_backend="qdrant"))
+    # The default stack (mock LLM + numpy store) is always available — no raise.
+    main._require_backend_packages(Settings())
+
+
+def test_pyproject_declares_every_nondefault_backend_extra() -> None:
+    """Every selectable non-default backend must be pip-installable via an extra,
+    so the boot guard's `pip install …[extra]` hint actually resolves. Guards
+    against config.py offering a backend with no way to install its package."""
+    import pathlib
+    import re
+
+    pyproject = (
+        pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml"
+    ).read_text()
+    extras_block = re.search(
+        r"\[project\.optional-dependencies\]\n((?:.*\n)+?)\n?\[", pyproject
+    )
+    assert extras_block, "expected an optional-dependencies table"
+    for extra in ("openai", "faiss", "qdrant"):
+        assert re.search(rf"(?m)^{extra}\s*=", extras_block.group(1)), (
+            f"backend '{extra}' is selectable in config.py but has no install extra"
+        )
 
 
 def test_readme_hook_claims_only_tech_that_runs_here() -> None:
@@ -252,11 +361,40 @@ def test_default_helm_image_tag_is_published_by_ci() -> None:
     import pathlib
 
     root = pathlib.Path(__file__).resolve().parent.parent
-    deployment = (root / "deploy" / "helm" / "templates" / "deployment.yaml").read_text()
+    deployment = (
+        root / "deploy" / "helm" / "templates" / "deployment.yaml"
+    ).read_text()
     assert ".Chart.AppVersion" in deployment  # the fallback the chart resolves
     ci = (root / ".github" / "workflows" / "ci.yml").read_text()
-    assert "deploy/helm/Chart.yaml" in ci, "CI must read the appVersion from the chart itself"
+    assert "deploy/helm/Chart.yaml" in ci, (
+        "CI must read the appVersion from the chart itself"
+    )
     assert "steps.chart.outputs.app_version" in ci, "CI must push the appVersion tag"
+
+
+def test_default_helm_ingress_is_disabled() -> None:
+    """Secure default: a bare `helm install` must NOT publish the service to the
+    internet. The data-plane is only authenticated when APP_API_KEY is set, so a
+    default-on Ingress would expose an unauthenticated /index + /query. The
+    ingress template is guarded on this flag, so default-false renders no
+    Ingress; enabling it is a deliberate opt-in documented alongside the auth +
+    TLS prerequisites."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    values = (root / "deploy" / "helm" / "values.yaml").read_text()
+    ingress_block = re.search(r"^ingress:\n((?:\s+.*\n)+)", values, flags=re.M)
+    assert ingress_block, "expected an ingress: block in values.yaml"
+    enabled = re.search(r"^\s+enabled:\s*(\S+)", ingress_block.group(1), flags=re.M)
+    assert enabled and enabled.group(1) == "false", (
+        "ingress must default to disabled — a default-on Ingress publishes the "
+        "unauthenticated data-plane to the internet"
+    )
+    template = (root / "deploy" / "helm" / "templates" / "ingress.yaml").read_text()
+    assert "if .Values.ingress.enabled" in template, (
+        "the Ingress must be guarded by ingress.enabled so default-false renders nothing"
+    )
 
 
 def test_helm_deploy_activates_json_logging() -> None:
@@ -273,7 +411,9 @@ def test_helm_deploy_activates_json_logging() -> None:
     env_pairs = dict(re.findall(r"^\s{2}(APP_ENV|ENV):\s*(\S+)", values, flags=re.M))
     assert env_pairs.get("APP_ENV") == "production"  # app settings knob
     assert env_pairs.get("ENV") == "prod"  # rag-llm-infra JSON-log knob
-    deployment = (root / "deploy" / "helm" / "templates" / "deployment.yaml").read_text()
+    deployment = (
+        root / "deploy" / "helm" / "templates" / "deployment.yaml"
+    ).read_text()
     assert "range $name, $value := .Values.env" in deployment, (
         "Deployment must render ALL of .Values.env, not a hardcoded key"
     )
@@ -306,7 +446,8 @@ def test_uvicorn_loggers_emit_json_under_prod(monkeypatch) -> None:
 
     uv_names = ("uvicorn", "uvicorn.access", "uvicorn.error")
     saved_uv = {
-        n: (logging.getLogger(n).handlers[:], logging.getLogger(n).propagate) for n in uv_names
+        n: (logging.getLogger(n).handlers[:], logging.getLogger(n).propagate)
+        for n in uv_names
     }
     try:
         # Install uvicorn's REAL default logging (plain handlers, propagate=False).
@@ -314,7 +455,9 @@ def test_uvicorn_loggers_emit_json_under_prod(monkeypatch) -> None:
 
         # Precondition (the bug): a uvicorn line never reaches the JSON root handler.
         logging.getLogger("uvicorn").info("startup line")
-        assert buf.getvalue() == "", "uvicorn logs must currently bypass the JSON root handler"
+        assert buf.getvalue() == "", (
+            "uvicorn logs must currently bypass the JSON root handler"
+        )
 
         main._route_uvicorn_logs_through_json()
 
@@ -336,6 +479,51 @@ def test_uvicorn_loggers_emit_json_under_prod(monkeypatch) -> None:
             lg.propagate = propagate
 
 
+def test_uvicorn_reroute_happens_at_import_not_only_lifespan() -> None:
+    """F1 regression: the uvicorn->JSON reroute must run at MODULE IMPORT under
+    ENV=prod, not only in the lifespan. uvicorn's order is configure_logging()
+    -> import the app -> log 'Started server process' / 'Waiting for application
+    startup.', so a lifespan-only reroute leaves those first two prod-boot lines
+    plain text.
+
+    Verified in a FRESH subprocess (reloading app.main in-process re-registers
+    its module-level Prometheus collectors and raises Duplicated timeseries). The
+    child installs uvicorn's real logging config exactly as uvicorn does before
+    importing an app, then imports app.main under ENV=prod — the import ALONE
+    must clear the `uvicorn` logger's plain handler and set it to propagate to
+    the root JSON handler. Remove the import-time reroute (leave only the
+    lifespan one) and this fails: importing app.main no longer reroutes."""
+    import json
+    import os
+    import pathlib
+    import subprocess
+    import sys
+
+    child = (
+        "import logging, logging.config, json\n"
+        "import uvicorn.config as uc\n"
+        "logging.config.dictConfig(uc.LOGGING_CONFIG)  # uvicorn's plain handlers, as at boot\n"
+        "uv = logging.getLogger('uvicorn')\n"
+        "assert uv.handlers and uv.propagate is False  # precondition: owns plain handler, no root propagation\n"
+        "import app.main  # noqa: F401 — the import-time reroute must fire here\n"
+        "print(json.dumps({'propagate': uv.propagate, 'handlers': len(uv.handlers)}))\n"
+    )
+    env = {**os.environ, "ENV": "prod", "APP_ENV": "production"}
+    proc = subprocess.run(
+        [sys.executable, "-c", child],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(pathlib.Path(__file__).resolve().parent.parent),
+    )
+    assert proc.returncode == 0, f"child failed:\n{proc.stderr}"
+    result = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert result["propagate"] is True, (
+        "importing app.main under ENV=prod must reroute the uvicorn logger to root"
+    )
+    assert result["handlers"] == 0, "uvicorn's plain handler must be cleared at import"
+
+
 def test_auth_failure_increments_auth_counter_not_request_counter(monkeypatch) -> None:
     """Regression: a rejected (401) request was invisible to metrics — only
     authenticated/served requests bumped a counter. A bad key must bump the
@@ -349,13 +537,20 @@ def test_auth_failure_increments_auth_counter_not_request_counter(monkeypatch) -
         return REGISTRY.get_sample_value("rag_auth_failures_total") or 0.0
 
     def _index_served() -> float:
-        return REGISTRY.get_sample_value("rag_requests_total", {"endpoint": "index"}) or 0.0
+        return (
+            REGISTRY.get_sample_value("rag_requests_total", {"endpoint": "index"})
+            or 0.0
+        )
 
     auth_before = _auth_failures()
     served_before = _index_served()
-    r = client.post("/index", json={"documents": ["x doc"]}, headers={"X-API-Key": "wrong"})
+    r = client.post(
+        "/index", json={"documents": ["x doc"]}, headers={"X-API-Key": "wrong"}
+    )
     assert r.status_code == 401
-    assert _auth_failures() == auth_before + 1.0, "a 401 must bump rag_auth_failures_total"
+    assert _auth_failures() == auth_before + 1.0, (
+        "a 401 must bump rag_auth_failures_total"
+    )
     assert _index_served() == served_before, (
         "a rejected request must not count as a served /index in rag_requests_total"
     )
