@@ -27,7 +27,7 @@ dependencies = [
 openai = ["rag-llm-infra[openai]>=0.1.1"]
 faiss = ["rag-llm-infra[faiss]>=0.1.1"]
 qdrant = ["rag-llm-infra[qdrant]>=0.1.1"]
-dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.6", "mypy>=1.11"]
+dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.6", "mypy>=1.11", "pyyaml>=6.0", "types-PyYAML>=6.0"]
 
 [project.urls]
 Homepage = "https://github.com/MarwaBS/production-rag-platform"
@@ -56,5 +56,16 @@ warn_unused_configs = true
 module = ["rag_llm_infra.*"]
 ignore_missing_imports = true
 
+# app.chunking is introduced by the ingestion work; until then the gates that
+# import it must still be collectable, and CI runs mypy before pytest.
+[[tool.mypy.overrides]]
+module = ["app.chunking"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
-addopts = "-ra"
+# The semantic marker covers gates that measure meaning rather than word
+# overlap. Deselected by default because the shipped embedder matches words, so
+# a base install cannot satisfy them; they become runnable when the semantic
+# embedding backend lands and are selected with `-m semantic`.
+addopts = "-ra -m 'not semantic'"
+markers = ["semantic: needs a semantic embedder; not satisfiable by the shipped one"]

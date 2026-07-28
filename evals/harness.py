@@ -35,6 +35,26 @@ CORPUS: tuple[str, ...] = (
     "Structured JSON logs let operators ingest and query application events at scale",
 )
 
+# Paraphrases of the same twelve questions, sharing NO word with their gold
+# document (asserted in tests). The literal set below measures whether tokens can
+# be matched; this set measures whether MEANING can be, which is what a retrieval
+# system is for. A query set drawn from its own gold documents' vocabulary cannot
+# tell the two apart.
+PARAPHRASE_QUERIES: tuple[tuple[str, int], ...] = (
+    ("cosine nearest neighbour lookup across embedding matrices", 0),
+    ("hosted engine holding embeddings queried by remote procedure call", 1),
+    ("gather numeric telemetry on a schedule then raise alarms", 2),
+    ("orchestrator placing workloads onto machines in a cluster", 3),
+    ("templating tool bundling cluster resource definitions for reuse", 4),
+    ("tooling that assembles runnable filesystem bundles layer by layer", 5),
+    ("python web framework validating payloads against declared schemas", 6),
+    ("answering questions using evidence fetched from a corpus first", 7),
+    ("security tooling reporting weaknesses inside shipped artefacts", 8),
+    ("commercial provider exposing text generation behind web endpoints", 9),
+    ("machine readable inventory enumerating everything shipped with releases", 10),
+    ("parseable event records engineers can search when volume grows", 11),
+)
+
 # (query, gold document) — the gold is the corpus entry the query is about.
 QUERIES: tuple[tuple[str, str], ...] = (
     ("inner product similarity search index", CORPUS[0]),
@@ -72,13 +92,15 @@ class EvalResult:
         return "\n".join(lines)
 
 
-def evaluate(k: int = 3) -> EvalResult:
+def evaluate(
+    k: int = 3, queries: tuple[tuple[str, str], ...] | None = None
+) -> EvalResult:
     """Index the fixed corpus and score each query's retrieval, via the real path."""
     store = get_vector_store("numpy")
     store.add(embed(list(CORPUS)))
     ranks: list[int] = []  # 1-based rank of the gold doc, or 0 if outside top-k
     misses: list[str] = []
-    for query, gold in QUERIES:
+    for query, gold in queries if queries is not None else QUERIES:
         _, idx = store.search(embed([query]), k=k)
         retrieved = [CORPUS[int(i)] for i in idx[0] if i >= 0]
         if gold in retrieved:
@@ -86,7 +108,7 @@ def evaluate(k: int = 3) -> EvalResult:
         else:
             ranks.append(0)
             misses.append(query)
-    n = len(QUERIES)
+    n = len(ranks)
     recall = sum(1 for r in ranks if r > 0) / n
     mrr = sum((1.0 / r if r > 0 else 0.0) for r in ranks) / n
     return EvalResult(k=k, n=n, recall_at_k=recall, mrr=mrr, misses=tuple(misses))
