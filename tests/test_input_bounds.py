@@ -5,10 +5,14 @@ The data-plane is unauthenticated by default and the reference pod runs with a
 process, so the pod that dies takes the whole index with it.
 
 Bounds are read from Settings rather than written here, so this file pins that a
-bound EXISTS and BITES without also inventing its value.
+bound EXISTS and BITES without also inventing its value. The schema is also
+strict and canonical: unknown fields are rejected rather than ignored, and text
+is normalised to NFC so canonically equivalent inputs are the same input.
 """
 
 from __future__ import annotations
+
+import unicodedata
 
 import pytest
 from fastapi.testclient import TestClient
@@ -75,6 +79,44 @@ def test_k_is_capped() -> None:
     over = bound("max_top_k") + 1
     assert (
         client.post("/query", json={"query": "vectors", "k": over}).status_code == 422
+    )
+
+
+def test_unknown_fields_are_rejected() -> None:
+    """A silently ignored extra field turns a typo into a silent misconfiguration:
+    `top_k` instead of `k` runs the query at the default and reports nothing."""
+    client.post("/index", json={"documents": ["a doc about vectors"]})
+    typo = client.post("/query", json={"query": "vectors", "top_k": 5})
+    assert typo.status_code == 422, "a typo'd `top_k` field was silently ignored"
+    stray = client.post("/index", json={"documents": ["a doc"], "replace": True})
+    assert stray.status_code == 422, "an unknown /index field was silently ignored"
+
+
+def test_canonically_equivalent_documents_are_one_document() -> None:
+    """NFC and NFD are two byte encodings of the same text; without
+    normalisation they embed differently and dedup keeps both, so one document
+    comes back as two independent sources corroborating each other."""
+    nfc = unicodedata.normalize("NFC", "café résumé naïveté détaillé")
+    nfd = unicodedata.normalize("NFD", nfc)
+    assert nfc != nfd  # control: the two encodings really are different bytes
+    body = client.post("/index", json={"documents": [nfc, nfd]}).json()
+    assert body == {"indexed": 1}, "NFC and NFD forms of one text indexed as two"
+
+
+def test_a_query_matches_its_document_whatever_the_unicode_form() -> None:
+    """A query that IS the document, in the other canonical form, must score as
+    the document itself — otherwise retrieval depends on which keyboard/OS
+    produced the bytes."""
+    nfc = unicodedata.normalize("NFC", "café résumé naïveté détaillé")
+    nfd = unicodedata.normalize("NFD", nfc)
+    assert nfc != nfd
+    client.post("/index", json={"documents": [nfc]})
+    body = client.post("/query", json={"query": nfd, "k": 1}).json()
+    assert body["grounded"] is True and body["retrieved"], (
+        "an NFD query failed to match its own NFC document"
+    )
+    assert body["retrieved"][0]["score"] == pytest.approx(1.0), (
+        "the NFD form of the document scored below the document itself"
     )
 
 
