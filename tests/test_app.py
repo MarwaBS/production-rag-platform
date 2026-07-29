@@ -57,8 +57,12 @@ def test_index_then_query_grounds_answer() -> None:
     body = client.post(
         "/query", json={"query": "vector similarity search", "k": 1}
     ).json()
-    assert body["retrieved"] == ["FAISS in-process vector similarity search"]
-    assert "grounded" in body["answer"]
+    assert body["grounded"] is True
+    assert [hit["text"] for hit in body["retrieved"]] == [
+        "FAISS in-process vector similarity search"
+    ]
+    # The answer must carry its evidence, not merely assert that it has some.
+    assert "FAISS" in body["answer"]
 
 
 def test_query_before_index_returns_409() -> None:
@@ -105,7 +109,8 @@ def test_index_replaces_corpus_not_additive() -> None:
     client.post("/index", json={"documents": ["first corpus alpha"]})
     client.post("/index", json={"documents": ["second corpus beta"]})
     body = client.post("/query", json={"query": "corpus", "k": 5}).json()
-    assert body["retrieved"] == ["second corpus beta"]  # the old corpus is gone
+    # The old corpus is gone entirely.
+    assert [hit["text"] for hit in body["retrieved"]] == ["second corpus beta"]
 
 
 def test_reindex_with_smaller_corpus_never_500s() -> None:
@@ -119,7 +124,9 @@ def test_reindex_with_smaller_corpus_never_500s() -> None:
     client.post("/index", json={"documents": ["only one doc about vectors"]})
     r = client.post("/query", json={"query": "vectors", "k": 5})
     assert r.status_code == 200
-    assert r.json()["retrieved"] == ["only one doc about vectors"]
+    assert [hit["text"] for hit in r.json()["retrieved"]] == [
+        "only one doc about vectors"
+    ]
 
 
 def _corpus(n: int) -> list[str]:

@@ -13,6 +13,7 @@ generation.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import logging
 import os
@@ -161,6 +162,25 @@ class _Index:
 
 _index: _Index | None = None
 
+
+def _doc_id(text: str) -> str:
+    """Identity from the content, so an id survives reordering and growth.
+
+    16 hex chars (64 bits) is a judgement call, not a derivation: accidental
+    collision odds are ~n^2/2^65 — negligible at any corpus this service holds.
+    """
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def _grounded_answer(hits: List[Dict[str, Any]]) -> str:
+    """Default-path answer that carries its own evidence, not just a count."""
+    top = hits[0]
+    return (
+        f"Grounded in {len(hits)} document(s); "
+        f"best evidence [{top['id']}]: {top['text']}"
+    )
+
+
 _REQUESTS = Counter("rag_requests_total", "Total API requests", ["endpoint"])
 # Rejected (401) requests never reach a route body, so they are invisible to
 # rag_requests_total. Count them separately so bad/missing-credential traffic is
@@ -248,19 +268,28 @@ def index(req: IndexRequest, _: None = Depends(require_api_key)) -> Dict[str, in
     persist to a shared store.
     """
     _REQUESTS.labels("index").inc()
+    # Dedup by content: the same document indexed twice would come back as two
+    # independent "sources" corroborating each other.
+    seen: set[str] = set()
+    docs: List[str] = []
+    for document in req.documents:
+        key = _doc_id(document)
+        if key not in seen:
+            seen.add(key)
+            docs.append(document)
     store = get_vector_store(settings.vector_backend)
-    store.add(embed(list(req.documents)))
+    store.add(embed(docs))
     global _index
-    _index = _Index(docs=tuple(req.documents), store=store)
+    _index = _Index(docs=tuple(docs), store=store)
     # Counts only — document CONTENT never goes to the logs.
     logger.info(
         "corpus indexed",
         extra={
-            "documents": len(req.documents),
+            "documents": len(docs),
             "vector_backend": settings.vector_backend,
         },
     )
-    return {"indexed": len(req.documents)}
+    return {"indexed": len(docs)}
 
 
 @app.post("/query")
@@ -281,16 +310,39 @@ def query(req: QueryRequest, _: None = Depends(require_api_key)) -> Any:
                 status_code=409,
             )
         docs, store = snapshot.docs, snapshot.store
-        _, idx = store.search(embed([req.query]), k=min(req.k, len(docs)))
-        retrieved = [docs[int(i)] for i in idx[0] if i >= 0]
-        context = "\n".join(f"- {d}" for d in retrieved)
-        if settings.llm_backend == "mock":
-            llm = get_llm(
-                "mock",
-                response=lambda _m: (
-                    f"(answer grounded in {len(retrieved)} retrieved docs)"
-                ),
+        query_vec = embed([req.query])
+        # A zero-norm query embeds to nothing this store can rank: the library
+        # renormalises it by /1.0 and argpartition then returns an ARBITRARY
+        # slice of the corpus at score 0.0 — so the refusal happens here,
+        # before the store is ever consulted.
+        if not float((query_vec * query_vec).sum()):
+            return {"grounded": False, "retrieved": [], "answer": None}
+        # The store protocol pins shape and truncation to min(k, size);
+        # descending order is implementation behaviour in all three backends —
+        # not a protocol clause — and is pinned HERE by the ordering gate, so
+        # neither a clamp nor a re-sort is earned.
+        scores, idx = store.search(query_vec, k=req.k)
+        hits: List[Dict[str, Any]] = []
+        for score, i in zip(scores[0], idx[0]):
+            # score <= 0: shares nothing with the query — arbitrary, not evidence.
+            if float(score) <= 0.0:
+                continue
+            text = docs[int(i)]
+            doc_id = _doc_id(text)
+            hits.append(
+                # One window per document until the splitter lands, hence ":0".
+                {
+                    "id": f"{doc_id}:0",
+                    "doc_id": doc_id,
+                    "score": float(score),
+                    "text": text,
+                }
             )
+        if not hits:
+            return {"grounded": False, "retrieved": [], "answer": None}
+        context = "\n".join(f"- {hit['text']}" for hit in hits)
+        if settings.llm_backend == "mock":
+            llm = get_llm("mock", response=lambda _m: _grounded_answer(hits))
         else:
             llm = get_llm(settings.llm_backend)
         answer = llm.invoke(
@@ -310,11 +362,11 @@ def query(req: QueryRequest, _: None = Depends(require_api_key)) -> Any:
         logger.info(
             "query answered",
             extra={
-                "retrieved": len(retrieved),
+                "retrieved": len(hits),
                 "k": req.k,
                 "llm_backend": settings.llm_backend,
             },
         )
-        return {"retrieved": retrieved, "answer": answer}
+        return {"grounded": True, "retrieved": hits, "answer": answer}
     finally:
         _QUERY_LATENCY.observe(time.perf_counter() - start)
