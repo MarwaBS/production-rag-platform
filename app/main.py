@@ -19,15 +19,23 @@ import logging
 import os
 import secrets
 import time
+import unicodedata
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Annotated, Any, Dict, List
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
-from pydantic import BaseModel, Field
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+)
+from starlette.types import Receive, Scope, Send
 
 from rag_llm_infra import configure_logging, get_llm, get_vector_store
 
@@ -132,7 +140,35 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     logger.info("service stopping")
 
 
+class _BodySizeLimit:
+    """Refuse an oversized body from its declared Content-Length, before FastAPI
+    buffers it whole to parse: the schema bounds cap every field, but only after
+    the full body is already in memory. No parseable length on a body-bearing
+    method is 411 — the alternative is buffering an unbounded stream to find out.
+    """
+
+    def __init__(self, app: Any, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["method"] in ("POST", "PUT", "PATCH"):
+            length = dict(scope["headers"]).get(b"content-length")
+            if length is None or not length.isdigit():
+                await JSONResponse(
+                    {"detail": "Content-Length required"}, status_code=411
+                )(scope, receive, send)
+                return
+            if int(length) > self.max_bytes:
+                await JSONResponse(
+                    {"detail": "request body too large"}, status_code=413
+                )(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
 app = FastAPI(title="production-rag-platform", version="1.0.0", lifespan=_lifespan)
+app.add_middleware(_BodySizeLimit, max_bytes=settings.max_request_bytes)
 
 
 @dataclass(frozen=True)
@@ -220,16 +256,43 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="invalid or missing API key")
 
 
+def _nfc(text: str) -> str:
+    # NFC and NFD are two byte encodings of one text; dedup and the hash
+    # embedder both key on bytes, so unnormalised input splits one document
+    # into two and stops a query from matching its own document.
+    return unicodedata.normalize("NFC", text)
+
+
 class IndexRequest(BaseModel):
-    # min_length=1: an empty index is meaningless and would otherwise flip
-    # /ready to 200 with zero documents.
-    documents: List[str] = Field(min_length=1)
+    # extra="forbid": a typo'd field is a client error, not something to ignore.
+    model_config = ConfigDict(extra="forbid")
+    # Item min_length + strip: a blank document indexes cleanly and would flip
+    # /ready to 200 over nothing. List min_length=1: an empty index is
+    # meaningless.
+    documents: List[
+        Annotated[
+            str,
+            StringConstraints(
+                min_length=1,
+                max_length=settings.max_document_chars,
+                strip_whitespace=True,
+            ),
+            AfterValidator(_nfc),
+        ]
+    ] = Field(min_length=1, max_length=settings.max_documents)
 
 
 class QueryRequest(BaseModel):
-    query: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")
+    # No strip here: a whitespace-only query is a valid string carrying no
+    # signal — the zero-norm guard answers it honestly (grounded: false).
+    query: Annotated[
+        str,
+        StringConstraints(min_length=1, max_length=settings.max_query_chars),
+        AfterValidator(_nfc),
+    ]
     # ge=1: a non-positive k reaches the store's argpartition and 500s.
-    k: int = Field(default=settings.default_top_k, ge=1)
+    k: int = Field(default=settings.default_top_k, ge=1, le=settings.max_top_k)
 
 
 @app.get("/health")
