@@ -50,10 +50,8 @@ def test_ci_audits_the_python_dependencies() -> None:
 
 
 def test_ci_gates_the_paraphrase_eval_under_the_semantic_backend() -> None:
-    """The paraphrase floor is the repo's strongest retrieval claim, and it is
-    only measurable where the semantic extra is installed. Without a job that
-    installs the extra and selects the semantic-marked tests, that gate is
-    deselected everywhere and can never fail."""
+    """Without a job installing the extra and selecting the semantic-marked
+    tests, the paraphrase floor is deselected everywhere and can never fail."""
     jobs = _ci()["jobs"]
     semantic_jobs = [
         job

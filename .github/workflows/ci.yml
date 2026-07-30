@@ -39,6 +39,24 @@ jobs:
       - name: Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)
         run: python -m evals
 
+  semantic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache the embedding model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-all-MiniLM-L6-v2
+      - run: python -m pip install --upgrade pip
+      - name: Install with the semantic extra
+        run: pip install -e ".[dev,semantic]" -c constraints-dev.txt
+      - name: Paraphrase floor + floor-derivation reproduce (semantic-marked gates)
+        run: pytest -q -m semantic
+
   iac:
     runs-on: ubuntu-latest
     steps:
@@ -56,7 +74,7 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
-    needs: [test, iac]
+    needs: [test, semantic, iac]
     permissions:
       contents: read
       packages: write
