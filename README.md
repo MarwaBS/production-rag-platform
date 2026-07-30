@@ -122,7 +122,7 @@ Full summaries in **[docs/decisions/](docs/decisions/)**:
 
 - **[ADR-001](docs/decisions/001-faiss-over-managed-vector-db.md)** — FAISS over a managed vector DB (sub-ms search, zero standing infra, per-request isolation).
 - **[ADR-002](docs/decisions/002-pre-grounding-over-post-filtering.md)** — Pre-grounding over post-filtering (prevention beats detection; clean audit trail).
-- **[ADR-003](docs/decisions/003-circuit-breaker-for-llm-resilience.md)** — Circuit breaker for LLM resilience (fail fast, cap spend, self-heal).
+- **[ADR-003](docs/decisions/003-circuit-breaker-for-llm-resilience.md)** — Circuit breaker for LLM resilience (timeout, bounded retry, fail fast, self-heal).
 - **[ADR-004](docs/decisions/004-vendor-neutral-llm-protocol.md)** — Vendor-neutral LLM protocol (model vendor is a config choice; open-sourced in `rag-llm-infra`).
 
 ## Deployment
