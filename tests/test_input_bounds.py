@@ -100,7 +100,9 @@ def test_canonically_equivalent_documents_are_one_document() -> None:
     nfd = unicodedata.normalize("NFD", nfc)
     assert nfc != nfd  # control: the two encodings really are different bytes
     body = client.post("/index", json={"documents": [nfc, nfd]}).json()
-    assert body == {"indexed": 1}, "NFC and NFD forms of one text indexed as two"
+    assert body == {"indexed": 1, "chunks": 1}, (
+        "NFC and NFD forms of one text indexed as two"
+    )
 
 
 def test_a_query_matches_its_document_whatever_the_unicode_form() -> None:

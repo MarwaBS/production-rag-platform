@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     max_query_chars: int = Field(default=1_000, ge=1)
     max_top_k: int = Field(default=50, ge=1)
     max_request_bytes: int = Field(default=10_485_760, ge=1)  # 10 MiB
+    # Chunking constants are DERIVED, not chosen — scripts/derive_chunking.py
+    # measures them and commits chunking_derivation.json; a gate re-runs the
+    # producer and pins these defaults against it.
+    max_chunk_chars: int = Field(default=256, ge=1)
+    chunk_overlap_chars: int = Field(default=83, ge=1)
     # LLM resilience: timeout, bounded retry, consecutive-failure breaker.
     # Judgement calls, APP_-overridable; the tests pin the behaviour of each
     # knob, not its value.

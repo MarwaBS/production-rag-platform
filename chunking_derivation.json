@@ -1,0 +1,27 @@
+{
+  "guarantee_corpus": "evals.harness.CORPUS",
+  "n_sentences": 12,
+  "sentence_chars": [
+    65,
+    67,
+    68,
+    70,
+    71,
+    72,
+    72,
+    75,
+    75,
+    78,
+    79,
+    83
+  ],
+  "longest_sentence_chars": 83,
+  "semantic_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "model_token_limit": 256,
+  "worst_case_chars_per_token": 1,
+  "embedder_window_chars": 256,
+  "derived_defaults": {
+    "chunk_overlap_chars": 83,
+    "max_chunk_chars": 256
+  }
+}

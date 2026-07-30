@@ -48,6 +48,7 @@ from starlette.types import Message, Receive, Scope, Send
 
 from rag_llm_infra import configure_logging, get_llm, get_vector_store
 
+from .chunking import chunk
 from .config import Settings, get_settings
 from .embedder import embed
 
@@ -213,6 +214,9 @@ class _Index:
     """
 
     docs: tuple[str, ...]
+    # One row per retrieval window, aligned with the store's vector rows:
+    # (window text, "docid:ordinal" id, parent doc id).
+    windows: tuple[tuple[str, str, str], ...]
     store: Any
 
 
@@ -494,21 +498,35 @@ def index(req: IndexRequest, _: None = Depends(require_api_key)) -> Dict[str, in
         if key not in seen:
             seen.add(key)
             docs.append(document)
+    # The retrieval unit is the WINDOW, not the document: a whole document is
+    # one point in the vector space however long it is, and the text handed to
+    # the model must fit what the embedder can represent (see app/chunking.py).
+    windows: List[tuple[str, str, str]] = []
+    for document in docs:
+        doc_id = _doc_id(document)
+        pieces = chunk(
+            document,
+            max_chars=settings.max_chunk_chars,
+            overlap_chars=settings.chunk_overlap_chars,
+        )
+        for ordinal, piece in enumerate(pieces):
+            windows.append((piece, f"{doc_id}:{ordinal}", doc_id))
     store = get_vector_store(settings.vector_backend)
-    store.add(embed(docs))
+    store.add(embed([text for text, _, _ in windows]))
     global _index
-    _index = _Index(docs=tuple(docs), store=store)
+    _index = _Index(docs=tuple(docs), windows=tuple(windows), store=store)
     _CORPUS_DOCS.set(len(docs))
     # Counts only — document CONTENT never goes to the logs.
     logger.info(
         "corpus indexed",
         extra={
             "documents": len(docs),
+            "chunks": len(windows),
             "vector_backend": settings.vector_backend,
             "request_id": _REQUEST_ID.get(),
         },
     )
-    return {"indexed": len(docs)}
+    return {"indexed": len(docs), "chunks": len(windows)}
 
 
 @app.post("/query")
@@ -528,7 +546,7 @@ def query(req: QueryRequest, _: None = Depends(require_api_key)) -> Any:
                 {"error": "index documents first", "retrieved": [], "answer": ""},
                 status_code=409,
             )
-        docs, store = snapshot.docs, snapshot.store
+        windows, store = snapshot.windows, snapshot.store
         query_vec = embed([req.query])
         # A zero-norm query embeds to nothing this store can rank: the library
         # renormalises it by /1.0 and argpartition then returns an ARBITRARY
@@ -547,13 +565,11 @@ def query(req: QueryRequest, _: None = Depends(require_api_key)) -> Any:
             # score <= 0: shares nothing with the query — arbitrary, not evidence.
             if float(score) <= 0.0:
                 continue
-            text = docs[int(i)]
-            doc_id = _doc_id(text)
+            text, chunk_id, doc_id = windows[int(i)]
             _HIT_SCORE.observe(float(score))
             hits.append(
-                # One window per document until the splitter lands, hence ":0".
                 {
-                    "id": f"{doc_id}:0",
+                    "id": chunk_id,
                     "doc_id": doc_id,
                     "score": float(score),
                     "text": text,

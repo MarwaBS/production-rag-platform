@@ -56,12 +56,6 @@ warn_unused_configs = true
 module = ["rag_llm_infra.*"]
 ignore_missing_imports = true
 
-# app.chunking is introduced by the ingestion work; until then the gates that
-# import it must still be collectable, and CI runs mypy before pytest.
-[[tool.mypy.overrides]]
-module = ["app.chunking"]
-ignore_missing_imports = true
-
 [tool.pytest.ini_options]
 # The semantic marker covers gates that measure meaning rather than word
 # overlap. Deselected by default because the shipped embedder matches words, so

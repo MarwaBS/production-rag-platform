@@ -53,7 +53,7 @@ def test_index_then_query_grounds_answer() -> None:
     ]
     r = client.post("/index", json={"documents": docs})
     assert r.status_code == 201
-    assert r.json() == {"indexed": 2}
+    assert r.json() == {"indexed": 2, "chunks": 2}
     body = client.post(
         "/query", json={"query": "vector similarity search", "k": 1}
     ).json()
