@@ -84,14 +84,23 @@ env:
   # "structured JSON logs" claim would be dead in the shipped deploy.
   ENV: prod
 
+# ServiceMonitor + PrometheusRule need the prometheus-operator CRDs, so they
+# are opt-in: a bare install on a cluster without those CRDs must not fail.
+monitoring:
+  enabled: false
+  scrapeInterval: 30s
+
 # Secrets (e.g. OPENAI_API_KEY for the openai backend, APP_API_KEY to guard
 # /index) are provided through a Kubernetes Secret, never through values.
 secrets:
-  # By default the chart renders an (empty) Secret so a bare `helm install` works
-  # in mock mode. For REAL secrets, manage the Secret OUT OF BAND (kubectl create
-  # secret / sealed-secret / external-secrets) and set `create: false` —
-  # otherwise every `helm upgrade` resets the Secret's data to what's templated
-  # here, clobbering the out-of-band values. See templates/secret.yaml.
+  # The chart renders the Secret from `data` by default. NOTE: the app REFUSES
+  # TO BOOT with APP_ENV=production (this chart's default) and no APP_API_KEY —
+  # an unauthenticated production data-plane must not start — so an install
+  # needs `--set secrets.data.APP_API_KEY=<base64>` (or APP_ENV overridden to a
+  # non-production env for a demo). For REAL secrets, manage the Secret OUT OF
+  # BAND (kubectl create secret / sealed-secret / external-secrets) and set
+  # `create: false` — otherwise every `helm upgrade` resets the Secret's data
+  # to what's templated here, clobbering the out-of-band values.
   create: true
   # base64-encoded key/values, dev/test only — NEVER commit real secrets here:
   data: {}

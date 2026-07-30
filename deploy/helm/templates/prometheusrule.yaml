@@ -1,0 +1,35 @@
+{{- /* Same CRD dependency as the ServiceMonitor, same opt-in guard. Every
+       series referenced here is registered in app/main.py — a test pins that,
+       so an alert can never watch a metric the app does not export. */}}
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  groups:
+    - name: {{ .Release.Name }}-retrieval-health
+      rules:
+        - alert: RagAnswersNothing
+          # Queries are arriving and every one comes back ungrounded: the
+          # service is up, serving, and useless — the exact state /health
+          # cannot see.
+          expr: >-
+            increase(rag_unanswered_total[15m]) > 0
+            and increase(rag_responses_total{endpoint="/query",status="200"}[15m])
+                == increase(rag_unanswered_total[15m])
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Every /query in the last 15m returned no grounded answer
+        - alert: RagServerErrors
+          expr: sum(increase(rag_responses_total{status=~"5.."}[5m])) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: 5xx responses are being served
+{{- end }}
