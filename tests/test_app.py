@@ -435,7 +435,7 @@ def test_pyproject_declares_every_nondefault_backend_extra() -> None:
         r"\[project\.optional-dependencies\]\n((?:.*\n)+?)\n?\[", pyproject
     )
     assert extras_block, "expected an optional-dependencies table"
-    for extra in ("openai", "faiss", "qdrant"):
+    for extra in ("openai", "faiss", "qdrant", "semantic"):
         assert re.search(rf"(?m)^{extra}\s*=", extras_block.group(1)), (
             f"backend '{extra}' is selectable in config.py but has no install extra"
         )

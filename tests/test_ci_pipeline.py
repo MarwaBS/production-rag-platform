@@ -47,3 +47,20 @@ def test_ci_audits_the_python_dependencies() -> None:
     assert any(
         line == "pip-audit" or line.startswith("pip-audit ") for line in lines
     ), "no run line invokes pip-audit"
+
+
+def test_ci_gates_the_paraphrase_eval_under_the_semantic_backend() -> None:
+    """The paraphrase floor is the repo's strongest retrieval claim, and it is
+    only measurable where the semantic extra is installed. Without a job that
+    installs the extra and selects the semantic-marked tests, that gate is
+    deselected everywhere and can never fail."""
+    jobs = _ci()["jobs"]
+    semantic_jobs = [
+        job
+        for job in jobs.values()
+        if "semantic]" in _runs(job) or "semantic]" in str(job)
+    ]
+    assert semantic_jobs, "no CI job installs the 'semantic' extra"
+    assert any("-m semantic" in _runs(job) for job in semantic_jobs), (
+        "the semantic extra is installed but the semantic-marked gates never run"
+    )

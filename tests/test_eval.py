@@ -88,16 +88,70 @@ def test_retrieval_meets_the_recall_floor_on_paraphrased_queries() -> None:
     assert result.recall_at_k >= RECALL_AT_3_FLOOR, result.summary()
 
 
-def test_each_floor_is_load_bearing(monkeypatch) -> None:
-    """All three floors must be able to fail, not only recall@3.
+def test_each_floor_is_load_bearing_through_the_serving_path(monkeypatch) -> None:
+    """All three floors must be able to fail, not only recall@3 — and they must
+    fail because the SERVICE degraded, not a private reimplementation of it.
 
-    A floor no measurement can fall beneath is a number in a file. The constant
-    embedder collapses every metric, so each floor must reject it.
+    Patching the app's own embedder proves both at once: if the eval did not
+    flow through app.main, collapsing app.main's embedder would not move these
+    numbers and every assertion here would be false.
     """
+    import app.main as main
+
     monkeypatch.setattr(
-        harness, "embed", lambda texts: np.ones((len(texts), 128), dtype="float32")
+        main, "embed", lambda texts: np.ones((len(texts), 128), dtype="float32")
     )
     top1, top3 = evaluate(k=1), evaluate(k=3)
     assert top1.recall_at_k < RECALL_AT_1_FLOOR, top1.summary()
     assert top3.recall_at_k < RECALL_AT_3_FLOOR, top3.summary()
     assert top3.mrr < MRR_FLOOR, top3.summary()
+
+
+def test_the_floors_are_derived_from_a_committed_measured_baseline() -> None:
+    """Every floor traces to scripts/derive_eval_floors.py's committed output,
+    and that baseline is a real measurement — not the saturated 1.000 a
+    token-overlap eval set produces by construction."""
+    import json
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    assert (root / "scripts" / "derive_eval_floors.py").exists(), (
+        "the eval floors have no committed producer: scripts/derive_eval_floors.py"
+    )
+    derivation_file = root / "eval_floors_derivation.json"
+    assert derivation_file.exists(), (
+        "no committed derivation for the eval floors: eval_floors_derivation.json"
+    )
+    derivation = json.loads(derivation_file.read_text(encoding="utf-8"))
+    baseline = derivation["measured"]["semantic_paraphrase"]
+    assert all(value < 1.0 for value in baseline.values()), (
+        f"the baseline is saturated ({baseline}); floors derived from it "
+        "cannot discriminate"
+    )
+    floors = derivation["derived_floors"]
+    assert RECALL_AT_1_FLOOR == floors["recall_at_1"]
+    assert RECALL_AT_3_FLOOR == floors["recall_at_3"]
+    assert MRR_FLOOR == floors["mrr"]
+
+
+@pytest.mark.semantic
+def test_the_floor_derivation_reproduces_under_the_semantic_backend() -> None:
+    """Running the producer must regenerate the committed derivation exactly —
+    an artefact nobody can regenerate is a number someone typed. Needs the
+    semantic extra, so it runs where that extra is installed."""
+    import json
+    import pathlib
+    import subprocess
+    import sys
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    rerun = subprocess.run(
+        [sys.executable, str(root / "scripts" / "derive_eval_floors.py"), "--print"],
+        capture_output=True,
+        text=True,
+        cwd=str(root),
+    )
+    assert rerun.returncode == 0, f"the producer failed: {rerun.stderr[-400:]}"
+    assert json.loads(rerun.stdout) == json.loads(
+        (root / "eval_floors_derivation.json").read_text(encoding="utf-8")
+    ), "the producer does not reproduce the committed derivation"
