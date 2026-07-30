@@ -34,9 +34,12 @@ def setting(name: str) -> Any:
 
 
 class _RecordingLLM:
-    def __init__(self, *, sleep: float = 0.0, fail: bool = False) -> None:
+    def __init__(
+        self, *, sleep: float = 0.0, fail: bool = False, fail_times: int = 0
+    ) -> None:
         self._sleep = sleep
         self._fail = fail
+        self._fail_times = fail_times
         self.calls = 0
         self.messages: list[dict[str, str]] = []
 
@@ -45,7 +48,7 @@ class _RecordingLLM:
         self.messages = messages
         if self._sleep:
             time.sleep(self._sleep)
-        if self._fail:
+        if self._fail or self.calls <= self._fail_times:
             raise RuntimeError("provider is down")
         return "an answer"
 
@@ -169,6 +172,82 @@ def test_the_breaker_closes_after_the_reset_window(llm, monkeypatch) -> None:
         "never let a request through again"
     )
     assert fake.calls > calls_when_open, "the recovered provider was never probed"
+
+
+def test_a_transient_failure_is_retried_and_succeeds(llm) -> None:
+    """One bad response from a healthy provider is noise, not an outage; the
+    caller should never see it."""
+    assert int(setting("llm_retry_attempts")) >= 1, (
+        "fixture: this gate needs at least one configured retry"
+    )
+    fake = llm(fail_times=1)
+    response = client.post("/query", json={"query": "vectors", "k": 1})
+    assert response.status_code == 200, "a single transient failure reached the caller"
+    assert fake.calls == 2, "the failed attempt was not retried exactly once"
+
+
+def test_retries_are_bounded(llm) -> None:
+    """A dead provider must cost a fixed number of attempts per request, not a
+    loop that hammers it while the client waits."""
+    attempts = 1 + int(setting("llm_retry_attempts"))
+    fake = llm(fail=True)
+    response = client.post("/query", json={"query": "vectors", "k": 1})
+    assert response.status_code == 503
+    assert response.json()["error"] == "llm_unavailable"
+    assert fake.calls == attempts, (
+        f"one request cost {fake.calls} provider calls against a budget of {attempts}"
+    )
+
+
+def test_timeouts_count_toward_the_breaker_and_are_not_retried(
+    llm, monkeypatch
+) -> None:
+    """A hang is one spent attempt — retrying it holds the worker for a second
+    timeout window. And consecutive hangs must open the breaker, or a hanging
+    provider is paid the full timeout on every request forever."""
+    monkeypatch.setattr(main.settings, "llm_timeout_seconds", 0.05)
+    threshold = int(setting("llm_breaker_failures"))
+    fake = llm(sleep=1.0)
+    for _ in range(threshold):
+        assert (
+            client.post("/query", json={"query": "vectors", "k": 1}).status_code == 503
+        )
+    assert fake.calls == threshold, (
+        "a timed-out attempt was retried — the worker is held for two windows"
+    )
+    response = client.post("/query", json={"query": "vectors", "k": 1})
+    assert response.status_code == 503
+    assert fake.calls == threshold, (
+        "with the breaker open the provider was still called"
+    )
+
+
+def test_failures_must_be_consecutive_to_open_the_breaker(llm) -> None:
+    """A success proves the provider is alive, so the count starts over; a
+    breaker that remembers every failure since boot eventually opens on a
+    provider that is fine."""
+    threshold = int(setting("llm_breaker_failures"))
+    assert threshold >= 2, (
+        "fixture: a threshold of 1 makes consecutiveness unobservable"
+    )
+    fake = llm(fail=True)
+    for _ in range(threshold - 1):
+        assert (
+            client.post("/query", json={"query": "vectors", "k": 1}).status_code == 503
+        )
+    fake._fail = False
+    assert (
+        client.post("/query", json={"query": "vectors", "k": 1}).status_code == 200
+    ), "the breaker opened before the threshold was reached"
+    fake._fail = True
+    for _ in range(threshold - 1):
+        assert (
+            client.post("/query", json={"query": "vectors", "k": 1}).status_code == 503
+        )
+    fake._fail = False
+    assert (
+        client.post("/query", json={"query": "vectors", "k": 1}).status_code == 200
+    ), "failures separated by a success still opened the breaker"
 
 
 def test_a_document_retrieval_did_not_return_never_reaches_the_model(llm) -> None:
