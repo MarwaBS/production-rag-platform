@@ -200,6 +200,51 @@ def test_the_secret_is_rendered_only_when_the_chart_creates_it() -> None:
     ), "templates/secret.yaml must be guarded by .Values.secrets.create"
 
 
+def test_the_chart_ships_a_scrape_object() -> None:
+    """The retrieval-health metrics exist so Prometheus can read them; without
+    a ServiceMonitor the chart exports series nothing ever scrapes."""
+    monitor = _template("servicemonitor.yaml")
+    assert "kind: ServiceMonitor" in monitor
+    directives = re.findall(r"\{\{-?(.*?)-?\}\}", monitor, flags=re.S)
+    assert any(
+        re.search(r"\bif\b.*\.Values\.monitoring\.enabled", d) for d in directives
+    ), (
+        "the ServiceMonitor needs the prometheus-operator CRDs, so it must be "
+        "guarded by monitoring.enabled rather than break every bare install"
+    )
+    assert isinstance(_values()["monitoring"]["enabled"], bool)
+
+
+def test_the_chart_ships_an_alert_rule_on_metrics_the_app_exports() -> None:
+    """An alert on a metric the app does not export can never fire — the rule
+    must name real series, checked against the code that registers them."""
+    rule = _template("prometheusrule.yaml")
+    assert "kind: PrometheusRule" in rule
+    directives = re.findall(r"\{\{-?(.*?)-?\}\}", rule, flags=re.S)
+    assert any(
+        re.search(r"\bif\b.*\.Values\.monitoring\.enabled", d) for d in directives
+    ), "the PrometheusRule needs the CRDs, so it shares the monitoring.enabled guard"
+    exported = set(
+        re.findall(
+            r"[\"'](rag_[a-z_]+)[\"']",
+            (ROOT / "app" / "main.py").read_text(encoding="utf-8"),
+        )
+    )
+    referenced = set(re.findall(r"\brag_[a-z_]+", rule))
+    assert referenced, "the rule alerts on none of this service's own series"
+
+    def is_exported(name: str) -> bool:
+        # Histograms export derived _bucket/_count/_sum series; a rule may
+        # legitimately reference those under the registered base name.
+        candidates = {name}
+        for suffix in ("_bucket", "_count", "_sum"):
+            candidates.add(name.removesuffix(suffix))
+        return bool(candidates & exported)
+
+    ghosts = {name for name in referenced if not is_exported(name)}
+    assert not ghosts, f"the rule references series the app never exports: {ghosts}"
+
+
 def test_the_ingress_is_disabled_by_default() -> None:
     """A bare install must publish nothing: the data-plane is only authenticated
     when an API key is set."""
