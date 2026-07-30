@@ -27,7 +27,7 @@ class Settings(BaseSettings):
         "numpy"  # faiss/qdrant need the extra
     )
     default_top_k: int = Field(default=3, ge=1)
-    # Input-contract bounds (R4). Judgement calls sized to the reference pod's
+    # Input-contract bounds. Judgement calls sized to the reference pod's
     # 512Mi memory limit, not derivations; the tests pin that each bound exists
     # and bites, not its value.
     max_documents: int = Field(default=10_000, ge=1)
