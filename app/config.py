@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     vector_backend: Literal["numpy", "faiss", "qdrant"] = (
         "numpy"  # faiss/qdrant need the extra
     )
+    # "hash" matches words (deterministic, no download); "semantic" matches
+    # meaning via sentence-transformers and needs the extra.
+    embedding_backend: Literal["hash", "semantic"] = "hash"
     default_top_k: int = Field(default=3, ge=1)
     # Input-contract bounds. Judgement calls sized to the reference pod's
     # 512Mi memory limit, not derivations; the tests pin that each bound exists

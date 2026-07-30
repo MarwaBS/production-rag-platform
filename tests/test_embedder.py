@@ -1,10 +1,6 @@
-"""The embedding backend is selectable, and selecting one is enforced.
-
-The hash embedder matches words; the semantic backend matches meaning. Which
-one serves is configuration, so the selection must be typed, defaulted, and —
-like every other optional backend here — refused at boot with the exact fix
-when its package is missing, rather than surfacing as a 500 mid-request.
-"""
+"""The embedding backend is typed configuration: defaulted, validated, and —
+like every other optional backend — refused at boot with the exact fix when
+its package is missing."""
 
 from __future__ import annotations
 
@@ -23,7 +19,8 @@ def test_the_default_backend_is_the_hash_embedder() -> None:
 
 def test_an_unknown_backend_is_rejected_at_startup() -> None:
     with pytest.raises(ValidationError):
-        Settings(embedding_backend="word2vec")
+        # The runtime rejection IS the assertion, so the bad literal is deliberate.
+        Settings(embedding_backend="word2vec")  # type: ignore[arg-type]
 
 
 def test_embed_dispatches_on_the_selected_backend(monkeypatch) -> None:

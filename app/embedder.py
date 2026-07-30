@@ -1,21 +1,28 @@
-"""Deterministic demo embedder (no model download).
+"""Text embedding behind one function, backend selected by APP_EMBEDDING_BACKEND.
 
-Reproducible bag-of-tokens hashing. Production swaps this for
-`rag_llm_infra.EmbeddingEngine` (real sentence embeddings).
+The default hash embedder matches WORDS: reproducible and download-free, but a
+paraphrase sharing no token with its document scores zero, and its 128 buckets
+alias distinct tokens as vocabulary grows past the bounded reference corpus.
+The "semantic" backend (sentence-transformers extra) matches meaning and is
+what the paraphrase eval floor is measured against.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
-from typing import List
+from typing import Any, List
 
 import numpy as np
 
+from .config import get_settings
+
 _DIM = 128
+_settings = get_settings()
+_semantic_model: Any = None
 
 
-def embed(texts: List[str]) -> np.ndarray:
+def _hash_embed(texts: List[str]) -> np.ndarray:
     vecs = np.zeros((len(texts), _DIM), dtype="float32")
     for row, text in enumerate(texts):
         for token in re.findall(r"[a-z0-9]+", text.lower()):
@@ -25,3 +32,22 @@ def embed(texts: List[str]) -> np.ndarray:
             digest = hashlib.md5(token.encode(), usedforsecurity=False).hexdigest()
             vecs[row, int(digest, 16) % _DIM] += 1.0
     return vecs
+
+
+def _semantic_embed(texts: List[str]) -> np.ndarray:
+    # Lazy and cached: the model costs seconds and ~90MB; boot already
+    # verified the package exists when this backend is selected.
+    global _semantic_model
+    if _semantic_model is None:
+        from sentence_transformers import SentenceTransformer
+
+        _semantic_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    return np.asarray(_semantic_model.encode(texts), dtype="float32")
+
+
+def embed(texts: List[str]) -> np.ndarray:
+    # Consulted per call so env-var selection works however early this module
+    # was imported.
+    if _settings.embedding_backend == "semantic":
+        return _semantic_embed(texts)
+    return _hash_embed(texts)

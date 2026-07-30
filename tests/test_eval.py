@@ -1,22 +1,14 @@
-"""Retrieval-quality gate — a gate that CAN go red.
+"""Retrieval-quality gates over the service's own /index and /query routes.
 
-The reference service ships a Mock LLM, so answer text is a fixed template;
-what can actually regress is RETRIEVAL. `evals.harness` runs a fixed Q/gold set
-through the real embed + NumPy store + top-k path. This module gates CI on a
-measured recall/MRR floor that sits with margin BELOW the observed baseline
-(recall@1 = recall@3 = 1.000, MRR = 1.000), so a genuine regression — a broken
-embedder, a store bug, a bad `k` default — trips it, while normal variation does
-not. `test_each_floor_is_load_bearing` proves the floors are not inert:
-degrade the embedder and every one of them must reject it.
-
-Scope, stated because the floors do not yet mean what they should: they are
-derived from a baseline built out of queries that share words with their gold
-document, so the shipped set measures word matching. The paraphrase set measures
-meaning and is marked `semantic`, deselected by default. Re-deriving the floors
-from an honest baseline is ingestion-phase work, not gate work.
+The floors come from scripts/derive_eval_floors.py (semantic backend on the
+paraphrase set, the one non-saturated baseline). The same bar asked of the
+default hash path on the literal set is a wiring gate it clears with headroom.
 """
 
 from __future__ import annotations
+
+import json
+import pathlib
 
 import numpy as np
 import pytest
@@ -24,13 +16,14 @@ import pytest
 import evals.harness as harness
 from evals.harness import evaluate
 
-# Floors below the measured baseline (all 1.000) — a real retrieval regression
-# drops beneath these; run-to-run noise (there is none; the embedder is
-# deterministic) does not. Not a can't-fail assertion: the true values clear
-# these with headroom AND can fall under them.
-RECALL_AT_1_FLOOR = 0.75
-RECALL_AT_3_FLOOR = 0.90
-MRR_FLOOR = 0.85
+_FLOORS = json.loads(
+    (
+        pathlib.Path(__file__).resolve().parent.parent / "eval_floors_derivation.json"
+    ).read_text(encoding="utf-8")
+)["derived_floors"]
+RECALL_AT_1_FLOOR = _FLOORS["recall_at_1"]
+RECALL_AT_3_FLOOR = _FLOORS["recall_at_3"]
+MRR_FLOOR = _FLOORS["mrr"]
 
 
 def test_retrieval_meets_recall_floor() -> None:
@@ -76,26 +69,23 @@ def test_the_default_embedder_cannot_match_a_paraphrase() -> None:
 
 
 @pytest.mark.semantic
-def test_retrieval_meets_the_recall_floor_on_paraphrased_queries() -> None:
-    """The published floor, asked of meaning rather than of vocabulary.
+def test_retrieval_meets_every_floor_on_paraphrased_queries(monkeypatch) -> None:
+    """The floors, asked of meaning rather than of vocabulary — the measurement
+    they were derived from. Selects the semantic backend itself, so the gate
+    cannot silently run against the hash path."""
+    import app.embedder as embedder
 
-    Marked `semantic` and deselected by default: the shipped embedder matches
-    words, so it cannot satisfy this, and selecting it deliberately is how the
-    gap is measured. The floor is the one the repository already publishes,
-    asked of queries that cannot be solved by copying words.
-    """
-    result = evaluate(k=3, queries=_paraphrased())
-    assert result.recall_at_k >= RECALL_AT_3_FLOOR, result.summary()
+    monkeypatch.setattr(embedder._settings, "embedding_backend", "semantic")
+    top1 = evaluate(k=1, queries=_paraphrased())
+    top3 = evaluate(k=3, queries=_paraphrased())
+    assert top1.recall_at_k >= RECALL_AT_1_FLOOR, top1.summary()
+    assert top3.recall_at_k >= RECALL_AT_3_FLOOR, top3.summary()
+    assert top3.mrr >= MRR_FLOOR, top3.summary()
 
 
 def test_each_floor_is_load_bearing_through_the_serving_path(monkeypatch) -> None:
-    """All three floors must be able to fail, not only recall@3 — and they must
-    fail because the SERVICE degraded, not a private reimplementation of it.
-
-    Patching the app's own embedder proves both at once: if the eval did not
-    flow through app.main, collapsing app.main's embedder would not move these
-    numbers and every assertion here would be false.
-    """
+    """Each floor must reject a degraded SERVICE: if the eval did not flow
+    through app.main, collapsing app.main's embedder would move nothing here."""
     import app.main as main
 
     monkeypatch.setattr(
@@ -108,9 +98,8 @@ def test_each_floor_is_load_bearing_through_the_serving_path(monkeypatch) -> Non
 
 
 def test_the_floors_are_derived_from_a_committed_measured_baseline() -> None:
-    """Every floor traces to scripts/derive_eval_floors.py's committed output,
-    and that baseline is a real measurement — not the saturated 1.000 a
-    token-overlap eval set produces by construction."""
+    """Every floor traces to the committed producer output, whose baseline is
+    a real, non-saturated measurement."""
     import json
     import pathlib
 
@@ -136,9 +125,8 @@ def test_the_floors_are_derived_from_a_committed_measured_baseline() -> None:
 
 @pytest.mark.semantic
 def test_the_floor_derivation_reproduces_under_the_semantic_backend() -> None:
-    """Running the producer must regenerate the committed derivation exactly —
-    an artefact nobody can regenerate is a number someone typed. Needs the
-    semantic extra, so it runs where that extra is installed."""
+    """The producer must regenerate the committed derivation exactly — an
+    artefact nobody can regenerate is a number someone typed."""
     import json
     import pathlib
     import subprocess

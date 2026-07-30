@@ -70,6 +70,13 @@ def _require_backend_packages(s: Settings) -> None:
         ("APP_LLM_BACKEND", s.llm_backend, "openai", "openai", "openai"),
         ("APP_VECTOR_BACKEND", s.vector_backend, "faiss", "faiss", "faiss"),
         ("APP_VECTOR_BACKEND", s.vector_backend, "qdrant", "qdrant_client", "qdrant"),
+        (
+            "APP_EMBEDDING_BACKEND",
+            s.embedding_backend,
+            "semantic",
+            "sentence_transformers",
+            "semantic",
+        ),
     )
     for env_var, selected, backend, module, extra in checks:
         if selected == backend and importlib.util.find_spec(module) is None:
@@ -498,9 +505,7 @@ def index(req: IndexRequest, _: None = Depends(require_api_key)) -> Dict[str, in
         if key not in seen:
             seen.add(key)
             docs.append(document)
-    # The retrieval unit is the WINDOW, not the document: a whole document is
-    # one point in the vector space however long it is, and the text handed to
-    # the model must fit what the embedder can represent (see app/chunking.py).
+    # The retrieval unit is the window, not the document (see app/chunking.py).
     windows: List[tuple[str, str, str]] = []
     for document in docs:
         doc_id = _doc_id(document)
