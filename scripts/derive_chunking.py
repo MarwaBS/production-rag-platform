@@ -1,20 +1,9 @@
 """Producer for the chunking constants (chunking_derivation.json).
 
-Two numbers govern the splitter, and neither is a preference:
-
-- `chunk_overlap_chars` must be at least the longest sentence the corpus is
-  expected to guarantee intact (app/chunking.py explains why the overlap is
-  what prevents a fractured grounding sentence). The guarantee set is the
-  shipped reference corpus in evals/harness.py — the documents the retrieval
-  eval holds the service accountable for — so the overlap IS that measurement.
-
-- `max_chunk_chars` must not exceed what the embedding backend can represent.
-  The semantic backend (sentence-transformers all-MiniLM-L6-v2) truncates at
-  256 wordpieces; a wordpiece is never shorter than one character, so 256
-  characters is the largest window guaranteed fully representable under any
-  tokenization. Deliberately worst-case: it needs no model download, so this
-  producer reproduces byte-identically in the base environment where CI runs
-  it. The default hash embedder has no length limit and imposes no bound.
+`chunk_overlap_chars` := the longest sentence in the shipped reference corpus
+(the sentences the eval guarantees intact). `max_chunk_chars` := the semantic
+model's 256-wordpiece truncation limit under worst-case one-character tokens —
+worst-case so the producer reproduces byte-identically with no model installed.
 
 Run: python scripts/derive_chunking.py            # rewrite the committed file
      python scripts/derive_chunking.py --print    # print, no write (CI gate)
