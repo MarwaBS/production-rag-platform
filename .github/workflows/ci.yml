@@ -28,8 +28,14 @@ jobs:
         run: ruff format --check .
       - name: Type-check
         run: mypy app evals tests
-      - name: Integration tests
-        run: pytest -q
+      - name: Audit Python dependencies (pip-audit)
+        # Trivy scans the built image; this catches a vulnerable pin at PR
+        # time, before an image is ever built.
+        run: |
+          pip install pip-audit -c constraints-dev.txt
+          pip-audit
+      - name: Integration tests (coverage floor enforced)
+        run: pytest -q --cov=app --cov-fail-under=85
       - name: Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)
         run: python -m evals
 
