@@ -213,6 +213,13 @@ def test_the_chart_ships_a_scrape_object() -> None:
         "guarded by monitoring.enabled rather than break every bare install"
     )
     assert isinstance(_values()["monitoring"]["enabled"], bool)
+    # The scrape references the Service port by name; a rename on either side
+    # kills the scrape with no render error, so the link itself is pinned.
+    port = re.search(r"^\s*- port:\s*(\w+)", monitor, flags=re.M)
+    assert port, "the ServiceMonitor endpoint must name the port it scrapes"
+    assert f"name: {port.group(1)}" in _template("service.yaml"), (
+        "the ServiceMonitor scrapes a port name the Service does not declare"
+    )
 
 
 def test_the_chart_ships_an_alert_rule_on_metrics_the_app_exports() -> None:

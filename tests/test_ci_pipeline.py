@@ -41,4 +41,9 @@ def test_ci_audits_the_python_dependencies() -> None:
     source tree's dependency set on pull requests, where a vulnerable pin
     should be caught before an image is ever built."""
     everything = "\n".join(_runs(job) for job in _ci()["jobs"].values())
-    assert "pip-audit" in everything, "no pip-audit step exists in the pipeline"
+    # An invocation line, not a mention: `pip install pip-audit` alone would
+    # download the auditor and never run it.
+    lines = [line.strip() for line in everything.splitlines()]
+    assert any(
+        line == "pip-audit" or line.startswith("pip-audit ") for line in lines
+    ), "no run line invokes pip-audit"
