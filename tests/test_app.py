@@ -194,7 +194,9 @@ def test_deployment_app_env_values_are_valid() -> None:
     ]
     assert values, "expected APP_ENV declarations in the deploy files"
     for val in values:
-        Settings(env=val)  # raises pydantic ValidationError if not a valid Literal
+        # A probe key, because production now refuses to boot without one; the
+        # assertion here is only that the env LITERAL is valid.
+        Settings(env=val, api_key="env-literal-probe")
 
 
 def test_index_requires_api_key_when_configured(monkeypatch) -> None:
@@ -658,7 +660,9 @@ def test_uvicorn_reroute_happens_at_import_not_only_lifespan() -> None:
         "import app.main  # noqa: F401 — the import-time reroute must fire here\n"
         "print(json.dumps({'propagate': uv.propagate, 'handlers': len(uv.handlers)}))\n"
     )
-    env = {**os.environ, "ENV": "prod", "APP_ENV": "production"}
+    # The probe key keeps the production boot refusal out of this test's way;
+    # what is under test here is only the logging reroute.
+    env = {**os.environ, "ENV": "prod", "APP_ENV": "production", "APP_API_KEY": "k"}
     proc = subprocess.run(
         [sys.executable, "-c", child],
         capture_output=True,

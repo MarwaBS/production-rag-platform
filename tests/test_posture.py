@@ -68,4 +68,4 @@ def test_development_keeps_the_interactive_docs() -> None:
     production-only assertion by accident."""
     from app.main import app
 
-    assert "/docs" in {route.path for route in app.routes}
+    assert "/docs" in {getattr(route, "path", "") for route in app.routes}

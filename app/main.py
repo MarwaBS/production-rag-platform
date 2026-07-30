@@ -21,14 +21,22 @@ import secrets
 import threading
 import time
 import unicodedata
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Annotated, Any, Dict, List
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.responses import JSONResponse
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -36,7 +44,7 @@ from pydantic import (
     Field,
     StringConstraints,
 )
-from starlette.types import Receive, Scope, Send
+from starlette.types import Message, Receive, Scope, Send
 
 from rag_llm_infra import configure_logging, get_llm, get_vector_store
 
@@ -168,7 +176,18 @@ class _BodySizeLimit:
         await self.app(scope, receive, send)
 
 
-app = FastAPI(title="production-rag-platform", version="1.0.0", lifespan=_lifespan)
+# The interactive docs hand any visitor the full API map; they are development
+# conveniences, so production does not mount them. /metrics stays up for the
+# in-cluster scrape.
+_show_docs = settings.env != "production"
+app = FastAPI(
+    title="production-rag-platform",
+    version="1.0.0",
+    lifespan=_lifespan,
+    docs_url="/docs" if _show_docs else None,
+    redoc_url="/redoc" if _show_docs else None,
+    openapi_url="/openapi.json" if _show_docs else None,
+)
 app.add_middleware(_BodySizeLimit, max_bytes=settings.max_request_bytes)
 
 
@@ -296,6 +315,71 @@ _AUTH_FAILURES = Counter(
     "Requests rejected for a missing/invalid API key (HTTP 401)",
 )
 _QUERY_LATENCY = Histogram("rag_query_latency_seconds", "Query latency in seconds")
+_CORPUS_DOCS = Gauge(
+    "rag_corpus_documents", "Documents in the in-process corpus after dedup"
+)
+# Scores are cosine similarities in (0, 1] after the <=0 drop, so the bins are
+# uniform deciles of that domain rather than the latency-shaped defaults.
+_HIT_SCORE = Histogram(
+    "rag_hit_score",
+    "Similarity score of each returned hit",
+    buckets=[round(i / 10, 1) for i in range(1, 11)],
+)
+_UNANSWERED = Counter(
+    "rag_unanswered_total",
+    "Queries answered grounded:false — zero-signal or no scoring evidence",
+)
+# rag_requests_total (above) has no status label, so it cannot express an
+# error rate; this series can, and it also counts rejections (413/422/...)
+# that never reach a route body.
+_RESPONSES = Counter(
+    "rag_responses_total",
+    "HTTP responses by endpoint and status",
+    ["endpoint", "status"],
+)
+_REQUEST_ID: ContextVar[str] = ContextVar("request_id", default="-")
+_TRACKED_PATHS = {"/index", "/query", "/health", "/ready", "/metrics"}
+
+
+class _RequestContext:
+    """Correlation id and status-labelled response counting for every HTTP
+    request. Outermost middleware, so even bodies the size cap or the schema
+    rejects are counted and carry an id. Unknown paths share one "other" label
+    to keep an attacker from minting unbounded series."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        supplied = dict(scope["headers"]).get(b"x-request-id", b"")
+        request_id = supplied.decode("latin-1") or uuid.uuid4().hex
+        token = _REQUEST_ID.set(request_id)
+        status = {"code": 500}
+
+        async def _send(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                status["code"] = message["status"]
+                message["headers"] = [
+                    *message.get("headers", []),
+                    (b"x-request-id", request_id.encode("latin-1")),
+                ]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, _send)
+        finally:
+            _REQUEST_ID.reset(token)
+            path = scope["path"]
+            endpoint = path if path in _TRACKED_PATHS else "other"
+            _RESPONSES.labels(endpoint, str(status["code"])).inc()
+
+
+# Registered after _BodySizeLimit, so this runs OUTERMOST: rejections from the
+# size cap or the schema still get counted and still carry a request id.
+app.add_middleware(_RequestContext)
 
 
 def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
@@ -414,12 +498,14 @@ def index(req: IndexRequest, _: None = Depends(require_api_key)) -> Dict[str, in
     store.add(embed(docs))
     global _index
     _index = _Index(docs=tuple(docs), store=store)
+    _CORPUS_DOCS.set(len(docs))
     # Counts only — document CONTENT never goes to the logs.
     logger.info(
         "corpus indexed",
         extra={
             "documents": len(docs),
             "vector_backend": settings.vector_backend,
+            "request_id": _REQUEST_ID.get(),
         },
     )
     return {"indexed": len(docs)}
@@ -449,6 +535,7 @@ def query(req: QueryRequest, _: None = Depends(require_api_key)) -> Any:
         # slice of the corpus at score 0.0 — so the refusal happens here,
         # before the store is ever consulted.
         if not float((query_vec * query_vec).sum()):
+            _UNANSWERED.inc()
             return {"grounded": False, "retrieved": [], "answer": None}
         # The store protocol pins shape and truncation to min(k, size);
         # descending order is implementation behaviour in all three backends —
@@ -462,6 +549,7 @@ def query(req: QueryRequest, _: None = Depends(require_api_key)) -> Any:
                 continue
             text = docs[int(i)]
             doc_id = _doc_id(text)
+            _HIT_SCORE.observe(float(score))
             hits.append(
                 # One window per document until the splitter lands, hence ":0".
                 {
@@ -472,6 +560,7 @@ def query(req: QueryRequest, _: None = Depends(require_api_key)) -> Any:
                 }
             )
         if not hits:
+            _UNANSWERED.inc()
             return {"grounded": False, "retrieved": [], "answer": None}
         context = "\n".join(
             # A document containing the literal closing tag would end its own
@@ -518,6 +607,7 @@ def query(req: QueryRequest, _: None = Depends(require_api_key)) -> Any:
                 "retrieved": len(hits),
                 "k": req.k,
                 "llm_backend": settings.llm_backend,
+                "request_id": _REQUEST_ID.get(),
             },
         )
         return {"grounded": True, "retrieved": hits, "answer": answer}

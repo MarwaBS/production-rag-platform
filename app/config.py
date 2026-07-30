@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +44,17 @@ class Settings(BaseSettings):
     llm_breaker_reset_seconds: float = Field(default=30.0, gt=0)
     # When set, POST /index (the destructive corpus replace) requires X-API-Key.
     api_key: str = ""
+
+    @model_validator(mode="after")
+    def _production_requires_an_api_key(self) -> Settings:
+        # The unsafe deploy the docs warn about must not start: dying at boot
+        # with the fix beats serving an unauthenticated production data-plane.
+        if self.env == "production" and not self.api_key:
+            raise ValueError(
+                "APP_ENV=production requires APP_API_KEY to be set: without it "
+                "/index and /query are open to anyone who can reach the pod"
+            )
+        return self
 
 
 def get_settings() -> Settings:
