@@ -120,6 +120,19 @@ def test_a_query_matches_its_document_whatever_the_unicode_form() -> None:
     )
 
 
+def test_a_body_with_no_declared_length_is_refused() -> None:
+    """A chunked body declares no Content-Length, so the size budget cannot be
+    checked without buffering the whole stream first — the exact cost the budget
+    exists to prevent. Refusing with 411 keeps the cap unbypassable."""
+    body = (chunk for chunk in [b'{"documents": ["a doc"]}'])
+    response = client.post(
+        "/index", content=body, headers={"content-type": "application/json"}
+    )
+    assert response.status_code == 411, (
+        f"a length-less chunked body was accepted with {response.status_code}"
+    )
+
+
 def test_total_request_size_is_capped() -> None:
     """The per-field bounds above still permit a request that is enormous in
     aggregate: many documents, each individually legal. The budget that protects
