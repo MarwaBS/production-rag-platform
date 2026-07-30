@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     max_query_chars: int = Field(default=1_000, ge=1)
     max_top_k: int = Field(default=50, ge=1)
     max_request_bytes: int = Field(default=10_485_760, ge=1)  # 10 MiB
+    # LLM resilience: timeout, bounded retry, consecutive-failure breaker.
+    # Judgement calls, APP_-overridable; the tests pin the behaviour of each
+    # knob, not its value.
+    llm_timeout_seconds: float = Field(default=5.0, gt=0)
+    llm_retry_attempts: int = Field(default=1, ge=0)
+    llm_breaker_failures: int = Field(default=3, ge=1)
+    llm_breaker_reset_seconds: float = Field(default=30.0, gt=0)
     # When set, POST /index (the destructive corpus replace) requires X-API-Key.
     api_key: str = ""
 
