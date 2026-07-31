@@ -9,6 +9,7 @@ in prose fails nothing when it silently disappears.
 from __future__ import annotations
 
 import pathlib
+import re
 import subprocess
 import sys
 from typing import Any, Dict, List
@@ -93,24 +94,28 @@ def test_ci_type_checks_every_directory_that_ships_python() -> None:
     assert shipping <= checked, sorted(shipping - checked)
 
 
-def _masking_keys(workflow: Dict[str, Any], job: Dict[str, Any]) -> List[str]:
-    """Keys that can mask a step's status without editing its run line.
+WORKFLOW_KEYS = {"name", True, "jobs"}
+JOB_KEYS = {"runs-on", "steps", "needs", "permissions", "env"}
+STEP_KEYS = {"name", "run", "uses", "with"}
+PUBLISH_STEP_KEYS = STEP_KEYS | {"if", "id"}
 
-    Enumerating them is sound only because GitHub defines them — unlike shell
-    spellings, the set is closed. `shell` is a step key and a defaults key; at
-    job scope it does not exist, so asserting its absence there proves nothing.
+
+def _unvetted_keys(workflow: Dict[Any, Any], job: Dict[str, Any]) -> List[str]:
+    """Keys in this job that nobody has read and accepted.
+
+    Listing the keys that can neuter a step is a blacklist over a set that keeps
+    producing new members — shell, then defaults, then continue-on-error, then
+    working-directory, then a step-level env that rebinds the image being
+    scanned. The keys GitHub defines are a closed set, so the sound direction is
+    the other one: allow what is used here and refuse the rest, which forces the
+    next key to be read before it is adopted.
     """
-    problems = []
-    for scope, where in ((workflow, "workflow"), (job, "job")):
-        if "defaults" in scope:
-            problems.append(f"{where} defaults can redefine every shell")
-    for key in ("if", "continue-on-error"):
-        if key in job:
-            problems.append(f"the job carries {key}")
+    problems = [f"workflow: {key}" for key in workflow if key not in WORKFLOW_KEYS]
+    problems += [f"job: {key}" for key in job if key not in JOB_KEYS]
     for step in job.get("steps", []):
-        for key in ("if", "continue-on-error", "shell"):
-            if key in step:
-                problems.append(f"a step carries {key}")
+        allowed = PUBLISH_STEP_KEYS if step.get("if") else STEP_KEYS
+        where = step.get("name") or step.get("uses") or step.get("run")
+        problems += [f"{where}: {key}" for key in step if key not in allowed]
     return problems
 
 
@@ -144,18 +149,20 @@ def test_ci_is_triggered_by_the_events_that_deliver_code() -> None:
     assert not [pattern for pattern in branches if pattern.startswith("!")], branches
 
 
-def test_the_masking_key_check_rejects_every_key_it_claims_to_cover() -> None:
+def test_the_key_check_refuses_every_key_it_has_not_read() -> None:
     """It returns nothing on the shipped file — which is also what a check
-    looking at keys that cannot occur returns."""
+    looking for keys that cannot occur returns. Each of these neuters a gate
+    without touching its run line, and none had to be foreseen."""
     clean: Dict[str, Any] = {"steps": [{"run": PROVE_SEMANTIC}]}
-    assert _masking_keys({}, clean) == []
-    shell = {"run": {"shell": "bash -c :"}}
-    assert _masking_keys({"defaults": shell}, clean)
-    assert _masking_keys({}, {**clean, "defaults": shell})
-    for key in ("if", "continue-on-error"):
-        assert _masking_keys({}, {**clean, key: "x"})
-        assert _masking_keys({}, {"steps": [{"run": PROVE_SEMANTIC, key: "x"}]})
-    assert _masking_keys({}, {"steps": [{"run": PROVE_SEMANTIC, "shell": "bash -c :"}]})
+    assert _unvetted_keys({"name": "CI", "jobs": {}}, clean) == []
+    assert _unvetted_keys({"name": "CI", "jobs": {}, "defaults": {}}, clean)
+    for key in ("defaults", "if", "continue-on-error", "strategy"):
+        assert _unvetted_keys({}, {**clean, key: "x"}), key
+    for key in ("shell", "continue-on-error", "working-directory", "env"):
+        assert _unvetted_keys({}, {"steps": [{"run": PROVE_SEMANTIC, key: "x"}]}), key
+    # A conditional step may carry `if` and `id`; what it may not be is a gate,
+    # which is asserted where the conditional tail is.
+    assert _unvetted_keys({}, {"steps": [{"run": "x", "if": "y", "shell": "z"}]})
 
 
 def test_ci_gates_the_paraphrase_eval_under_the_semantic_backend() -> None:
@@ -174,26 +181,14 @@ def test_ci_gates_the_paraphrase_eval_under_the_semantic_backend() -> None:
     )
 
 
-def test_no_job_the_publish_waits_on_can_mask_a_failure() -> None:
-    """The jobs the image publish waits on are exactly the ones whose verdicts
-    decide anything, so those are the ones no masking key may sit on. Reading
-    them off `needs` covers a gate job added later; naming the semantic job
-    covered the one this check was written for."""
+def test_no_job_carries_a_key_nobody_has_read() -> None:
+    """Every job, not the ones some other job waits on: scoping this by `needs`
+    left the publish job — the one holding the image scan — unexamined."""
     workflow = _ci()
-    jobs = workflow["jobs"]
-    gate_jobs = jobs["docker"].get("needs", [])
-    assert gate_jobs, "the image publish waits on nothing"
-    for name in gate_jobs:
-        assert _masking_keys(workflow, jobs[name]) == [], (
-            f"{name}: {_masking_keys(workflow, jobs[name])}"
+    for name, job in workflow["jobs"].items():
+        assert _unvetted_keys(workflow, job) == [], (
+            f"{name}: {_unvetted_keys(workflow, job)}"
         )
-
-
-def test_nothing_anywhere_is_allowed_to_fail_without_failing() -> None:
-    """Tolerating an error has no honest use in this workflow, at any scope."""
-    for name, job in _ci()["jobs"].items():
-        for scope in (job, *job.get("steps", [])):
-            assert "continue-on-error" not in scope, name
 
 
 PUBLISH_CONDITION = "github.event_name == 'push' && github.ref == 'refs/heads/main'"
@@ -211,13 +206,23 @@ ADVERTISED_COMMANDS = (
     "helm template",
     PROVE_SEMANTIC,
 )
-ADVERTISED_ACTIONS = (
-    "docker/build-push-action",
-    "aquasecurity/trivy-action",
-    "anchore/sbom-action",
-    "actions/upload-artifact",
-    "hadolint/hadolint-action",
-)
+# The inputs each vetted action may carry. Pinning `exit-code` and `severity`
+# left the keys that excuse findings — skip-dirs, trivyignores, ignore-policy —
+# free to arrive later, so the direction is reversed here too.
+VETTED_INPUTS = {
+    "aquasecurity/trivy-action": {
+        "image-ref",
+        "format",
+        "exit-code",
+        "severity",
+        "ignore-unfixed",
+        "vuln-type",
+    },
+    "anchore/sbom-action": {"image", "format", "output-file"},
+    "actions/upload-artifact": {"name", "path"},
+    "hadolint/hadolint-action": {"dockerfile", "failure-threshold"},
+}
+ADVERTISED_ACTIONS = tuple(VETTED_INPUTS)
 
 
 def _steps(workflow: Dict[Any, Any]) -> List[Dict[str, Any]]:
@@ -228,34 +233,59 @@ def _action(workflow: Dict[Any, Any], name: str) -> List[Dict[str, Any]]:
     return [s for s in _steps(workflow) if s.get("uses", "").split("@")[0] == name]
 
 
+def _uncommented(run: str) -> List[str]:
+    """A gate quoted inside a shell comment is not a gate that runs."""
+    return [line for line in run.splitlines() if not line.strip().startswith("#")]
+
+
+def _advertised(step: Dict[str, Any]) -> bool:
+    lines = _uncommented(step.get("run", ""))
+    return (
+        step.get("uses", "").split("@")[0] in ADVERTISED_ACTIONS
+        or bool((step.get("with") or {}).get("load"))
+        or any(command in line for line in lines for command in ADVERTISED_COMMANDS)
+    )
+
+
 def _gate_steps(workflow: Dict[Any, Any]) -> List[Dict[str, Any]]:
-    """Steps that decide a verdict, as against the step that publishes."""
-    gates = []
-    for step in _steps(workflow):
-        if (step.get("with") or {}).get("push"):
-            continue
-        run, action = step.get("run", ""), step.get("uses", "").split("@")[0]
-        if action in ADVERTISED_ACTIONS or any(c in run for c in ADVERTISED_COMMANDS):
-            gates.append(step)
-    return gates
+    """Steps whose outcome decides a verdict.
+
+    Excluding the publish by a `with.push` key let any step opt out of being a
+    gate by setting it, and YAML reads `push: "false"` as a truthy string. What
+    identifies the publish is that it publishes: it carries the merge
+    condition, which nothing that decides a verdict may do."""
+    return [s for s in _steps(workflow) if not s.get("if") and _advertised(s)]
+
+
+def _conditional_gates(workflow: Dict[Any, Any]) -> List[Dict[str, Any]]:
+    """Advertised gates wearing the merge condition — how one leaves the set
+    above while remaining the thing the README sells."""
+    return [s for s in _steps(workflow) if s.get("if") and _advertised(s)]
 
 
 def test_every_command_the_readme_advertises_runs_in_the_pipeline() -> None:
-    """Each is sold as a gate, and deleting any of their steps was silent."""
-    everything = "\n".join(_runs(job) for job in _ci()["jobs"].values())
+    """Each is sold as a gate, and deleting any of their steps was silent —
+    including by moving the command into a shell comment beside it."""
+    lines = [
+        line for step in _steps(_ci()) for line in _uncommented(step.get("run", ""))
+    ]
     for command in ADVERTISED_COMMANDS:
-        assert command in everything, command
+        assert any(command in line for line in lines), command
 
 
 def test_every_action_the_readme_advertises_is_present_and_can_fail() -> None:
-    """Present is half of it: a scan that reports and exits zero, or a linter
-    whose threshold excuses everything, is decoration with a green tick."""
+    """Present is half of it: a scan that reports and exits zero, or one told to
+    skip every directory it would have looked in, is decoration with a tick."""
     workflow = _ci()
-    for name in ADVERTISED_ACTIONS:
-        assert _action(workflow, name), name
-    for step in _steps(workflow):
-        # A moving ref changes the gate without changing the file.
-        assert not step.get("uses", "").endswith(("@master", "@main")), step["uses"]
+    for name, vetted in VETTED_INPUTS.items():
+        steps = _action(workflow, name)
+        assert steps, name
+        for step in steps:
+            # An exact version, so a re-pointed tag cannot change the verdict
+            # without changing this file. The setup actions below float on
+            # majors deliberately; these decide something.
+            assert re.fullmatch(r"v\d+\.\d+\.\d+", step["uses"].split("@")[1]), step
+            assert set(step["with"]) <= vetted, set(step["with"]) - vetted
     scan = _action(workflow, "aquasecurity/trivy-action")[0]["with"]
     assert scan["exit-code"] == "1", scan
     assert "CRITICAL" in scan["severity"], scan
@@ -264,15 +294,34 @@ def test_every_action_the_readme_advertises_is_present_and_can_fail() -> None:
     assert (ROOT / lint["dockerfile"]).is_file(), lint
 
 
-def test_what_gets_scanned_is_what_gets_built() -> None:
-    """The scan names an image by tag. Any other tag scans something else and
-    passes, while the image that ships was never looked at."""
+def test_what_gets_scanned_is_what_gets_built_and_what_gets_pushed() -> None:
+    """Comparing the two expressions is not comparing the two images: a
+    step-level env rebinds what they expand to, and the push is a second build
+    whose inputs were never tied to the one that was scanned."""
     workflow = _ci()
     loaded = [s for s in _steps(workflow) if (s.get("with") or {}).get("load")]
     assert len(loaded) == 1, loaded
-    tag = loaded[0]["with"]["tags"].strip()
-    assert _action(workflow, "aquasecurity/trivy-action")[0]["with"]["image-ref"] == tag
-    assert _action(workflow, "anchore/sbom-action")[0]["with"]["image"] == tag
+    build = loaded[0]["with"]
+    assert _action(workflow, "aquasecurity/trivy-action")[0]["with"]["image-ref"] == (
+        build["tags"].strip()
+    )
+    assert _action(workflow, "anchore/sbom-action")[0]["with"]["image"] == (
+        build["tags"].strip()
+    )
+    published = [s for s in _steps(workflow) if (s.get("with") or {}).get("push")]
+    assert len(published) == 1, published
+    for shared in ("context", "file"):
+        assert published[0]["with"][shared] == build[shared], shared
+
+
+def test_the_sbom_that_is_uploaded_is_the_sbom_that_was_generated() -> None:
+    """Two steps joined by a filename nobody compared: the artifact can hold
+    anything while the README sells a CycloneDX bill of materials."""
+    workflow = _ci()
+    sbom = _action(workflow, "anchore/sbom-action")[0]["with"]
+    upload = _action(workflow, "actions/upload-artifact")[0]["with"]
+    assert sbom["format"] == "cyclonedx-json", sbom
+    assert upload["path"] == sbom["output-file"], (upload, sbom)
 
 
 def test_the_publish_waits_on_every_other_job() -> None:
@@ -289,6 +338,7 @@ def test_no_gate_step_is_conditional_and_publishing_comes_last() -> None:
     them. Position alone does not: a gate that is also conditional sits happily
     in that tail, running after the image it was meant to vet has been pushed."""
     workflow = _ci()
+    assert _conditional_gates(workflow) == [], _conditional_gates(workflow)
     for step in _gate_steps(workflow):
         assert "if" not in step, step.get("name") or step.get("uses")
     for name, job in workflow["jobs"].items():

@@ -95,8 +95,8 @@ jobs:
           load: true
           tags: ${{ env.IMAGE }}:ci
       - name: Trivy image scan (fail on fixable HIGH/CRITICAL)
-        # Pinned to a release tag (not @master) so a scanner change can't silently
-        # alter the gate, matching the rest of the pinned actions in this file.
+        # Pinned to an exact version so a re-pointed tag cannot change the
+        # verdict. The setup actions float on majors; these decide something.
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:ci
@@ -106,13 +106,13 @@ jobs:
           ignore-unfixed: true
           vuln-type: os,library
       - name: Generate CycloneDX SBOM
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@v0.24.0
         with:
           image: ${{ env.IMAGE }}:ci
           format: cyclonedx-json
           output-file: sbom.cyclonedx.json
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: sbom-cyclonedx
           path: sbom.cyclonedx.json
