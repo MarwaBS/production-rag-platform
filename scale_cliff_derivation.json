@@ -4,7 +4,7 @@
   "queries": "evals.harness.QUERIES",
   "queries_evaluated": 12,
   "distractor_construction": "note<i> plus 8 words cycling through the corpus's own vocabulary, which repeats every 197 documents: competition on the words the queries themselves use",
-  "control_construction": "the identical construction over a pool of the same size that the corpus shares no word with. One new token per document either way, so what differs between the curves is only whose words are reused",
+  "control_construction": "the identical construction over a pool of the same size that the corpus shares no word with. Beyond one new token per document, the pool's own 197 words are unseen too, so the control carries more distinct vocabulary than the curve above, not less",
   "recall_at_3": {
     "24": 1.0,
     "100": 1.0,

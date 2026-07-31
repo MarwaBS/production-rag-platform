@@ -2,11 +2,11 @@
 
 Measures recall@3 of the literal query set through the service's own /index and
 /query as the corpus grows, on the default hash backend. The same sizes are
-measured twice, by two constructions that differ in exactly one thing: whether
-the distractors reuse the corpus's own words. Everything else — the document
-length, the word count, the rate at which unseen tokens arrive — is held equal,
-because a control that moves any of those measures two effects at once and can
-attribute neither.
+measured twice by one construction over two word pools of equal size, so the
+word count and the index arithmetic are identical and only the words being
+reused change. Two things do not match and both cut against the control: its
+words are longer, and its pool is itself vocabulary the corpus lacks, so it
+carries that many more distinct tokens into the buckets rather than fewer.
 
 Run: python scripts/derive_scale_cliff.py            # rewrite the committed file
      python scripts/derive_scale_cliff.py --print    # print, no write (CI gate)
@@ -107,8 +107,9 @@ def derive() -> dict:
         ),
         "control_construction": (
             "the identical construction over a pool of the same size that the "
-            "corpus shares no word with. One new token per document either way, "
-            "so what differs between the curves is only whose words are reused"
+            f"corpus shares no word with. Beyond one new token per document, "
+            f"the pool's own {len(FOREIGN)} words are unseen too, so the control "
+            "carries more distinct vocabulary than the curve above, not less"
         ),
         "recall_at_3": shipped,
         "recall_at_3_control": control,

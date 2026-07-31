@@ -133,13 +133,13 @@ Full summaries in **[docs/decisions/](docs/decisions/)**:
 
 ## CI/CD
 
-**This repository's own CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push and PR:
+**This repository's own CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every pull request and every push to `main`:
 `ruff` lint + format check · `mypy` · `pip-audit` on the source tree's dependencies · `pytest` integration
 tests **under an 85% coverage floor** · a **retrieval eval gate** ([`evals/`](evals/) — recall@k over a fixed
 Q/gold set driven through the service's own `/index` and `/query`, floored in [`tests/test_eval.py`](tests/test_eval.py)
 so a retrieval regression fails the build) · a separate **`semantic` job** that installs the optional
 sentence-transformers extra and runs the paraphrase floors, which the default word-matching embedder cannot
-satisfy — that job's one step is [`scripts/check_semantic_report.py`](scripts/check_semantic_report.py), which
+satisfy — that job's only test step is [`scripts/check_semantic_report.py`](scripts/check_semantic_report.py), which
 starts the run itself into a directory it creates and fails the build unless every semantic gate appears in the
 report that run wrote as having passed · `helm lint` + `helm template`
 render · `hadolint` on the Dockerfile · Docker image build · **Trivy** image scan · **CycloneDX SBOM**
