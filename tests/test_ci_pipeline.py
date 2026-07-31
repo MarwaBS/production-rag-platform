@@ -57,6 +57,27 @@ def test_ci_audits_the_python_dependencies() -> None:
     ), "no run line invokes pip-audit"
 
 
+def test_ci_type_checks_every_directory_that_ships_python() -> None:
+    """The gate that fails the build on an unproven semantic run now lives in
+    scripts/, which the type-check argument list did not name. Naming the
+    directories that exist beats naming the three that existed when it was
+    written."""
+    everything = "\n".join(_runs(job) for job in _ci()["jobs"].values())
+    invocation = [
+        line.strip()
+        for line in everything.splitlines()
+        if line.strip().startswith("mypy ")
+    ]
+    assert invocation, "no run line invokes mypy"
+    checked = {argument for line in invocation for argument in line.split()[1:]}
+    tracked = subprocess.run(
+        ["git", "ls-files", "*.py"], capture_output=True, text=True, cwd=str(ROOT)
+    )
+    shipping = {path.split("/")[0] for path in tracked.stdout.split() if "/" in path}
+    assert shipping, "fixture: git listed no tracked python packages"
+    assert shipping <= checked, sorted(shipping - checked)
+
+
 def _masking_keys(workflow: Dict[str, Any], job: Dict[str, Any]) -> List[str]:
     """Keys that can mask a step's status without editing its run line.
 

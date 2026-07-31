@@ -1,8 +1,10 @@
 """What the default embedder does once the corpus outgrows the reference size.
 
-Its 128 buckets alias distinct vocabulary, so gold documents fall out of the
-top 3 as competition grows. An unmeasured limitation reads as a capability, so
-the curve is measured, committed, and re-measured here.
+Gold documents fall out of the top 3 as the corpus grows, and the reason is not
+the document count: distractors that reuse the corpus's own words compete on the
+very terms the queries use. A control that changes nothing else is what tells
+those two apart. An unmeasured limitation reads as a capability, so the curves
+are measured, committed, and re-measured here.
 """
 
 from __future__ import annotations
@@ -48,20 +50,48 @@ def test_the_committed_curve_records_the_degradation_it_documents() -> None:
     assert curve[str(sizes[-1])] < curve[str(sizes[0])], curve
 
 
-def test_the_curve_separates_competition_volume_from_vocabulary_growth() -> None:
-    """Documents the queries share no word with still crowd the buckets, so the
-    fall is not all competition on wording. The control holds the wording still
-    and measures the buckets alone; the gap to the shipped curve is the rest."""
+def test_the_control_changes_one_thing_about_the_shipped_construction() -> None:
+    """A control that also changes how fast unseen words arrive measures two
+    effects at once and can attribute neither. The two constructions must
+    introduce new vocabulary at the same rate and differ only in whether the
+    words they reuse are the ones the queries use."""
+    from scripts.derive_scale_cliff import VOCABULARY, _control, _distractor
+
+    known = set(VOCABULARY)
+
+    def novel(make, count: int) -> int:
+        return len(
+            {
+                token
+                for index in range(count)
+                for token in make(index, VOCABULARY).split()
+            }
+            - known
+        )
+
+    rates = [novel(make, 2000) - novel(make, 1000) for make in (_distractor, _control)]
+    assert rates[0] == rates[1], rates
+    shipped = {t for i in range(1000) for t in _distractor(i, VOCABULARY).split()}
+    control = {t for i in range(1000) for t in _control(i, VOCABULARY).split()}
+    assert shipped & known, "the shipped distractors reuse none of the corpus's words"
+    assert not (control & known), "the control reuses the corpus's own words"
+
+
+def test_the_curve_separates_the_document_count_from_the_words_they_use() -> None:
+    """The control holds the corpus's own words out of the distractors and
+    changes nothing else, so what it does at the largest size is what the
+    document count alone costs. The shipped curve's shortfall against it is what
+    reusing the queries' own words costs."""
     committed = _committed()
     curve, control = committed["recall_at_3"], committed["recall_at_3_control"]
     assert control.keys() == curve.keys(), "the control was measured elsewhere"
     sizes = sorted(int(size) for size in curve)
     largest, smallest = str(sizes[-1]), str(sizes[0])
-    assert control[largest] < control[smallest], (
-        "the buckets cost nothing on their own, so the control explains nothing"
+    assert control[largest] == control[smallest], (
+        "the control no longer holds flat, so the attribution needs re-deriving"
     )
     assert curve[largest] < control[largest], (
-        "same-domain wording costs nothing beyond the crowding it arrives with"
+        "reusing the corpus's words costs nothing, so there is nothing to explain"
     )
 
 
