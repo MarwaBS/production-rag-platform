@@ -200,6 +200,17 @@ def test_the_shipped_overlap_is_wide_enough_for_the_sentence_it_guarantees() -> 
     assert setting("max_chunk_chars") == defaults["max_chunk_chars"]
 
 
+def test_the_producer_measures_sentences_rather_than_documents() -> None:
+    """The overlap guarantee is stated per sentence. Every line of the present
+    corpus is one, so the artefact cannot tell the two apart — the split can."""
+    from scripts.derive_chunking import _sentences
+
+    assert _sentences("One short. A second, rather longer sentence here.") == [
+        "One short.",
+        "A second, rather longer sentence here.",
+    ]
+
+
 def test_the_type_checker_scaffold_is_removed_once_the_splitter_lands() -> None:
     """The override that lets the type checker ignore a module that does not yet
     exist must not outlive it, or it hides real errors in the shipped one."""
