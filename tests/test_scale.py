@@ -89,15 +89,12 @@ def test_the_two_pools_are_the_same_size_and_share_no_word() -> None:
 
 
 def _buckets(words: list[str]) -> set[int]:
-    import re
+    """Through the embedder, not a second copy of its tokenising: a copy agrees
+    with it right up until one of them changes."""
+    from app.embedder import _hash_embed
 
-    from app.embedder import _DIM, hashlib  # type: ignore[attr-defined]
-
-    return {
-        int(hashlib.md5(token.encode(), usedforsecurity=False).hexdigest(), 16) % _DIM
-        for word in words
-        for token in re.findall(r"[a-z0-9]+", word.lower())
-    }
+    counts = _hash_embed([" ".join(words)])[0]
+    return {index for index, count in enumerate(counts) if count}
 
 
 def test_the_control_still_lands_in_the_buckets_the_queries_use() -> None:
@@ -105,7 +102,11 @@ def test_the_control_still_lands_in_the_buckets_the_queries_use() -> None:
     would hold flat whatever the corpus did, and 'holds flat' is the whole
     finding. A pool chosen to dodge the queries reaches none of their buckets;
     197 words over 128 buckets reach any given bucket about four times in five,
-    so half of them is a floor no pool picked without looking will fall under."""
+    so half of them is a floor no pool picked without looking will fall under.
+
+    A coarse floor: what forbids the selection itself is the pinned expression
+    above, which has no way to read a query. This catches a pool that got past
+    that."""
     from evals.harness import QUERIES
     from scripts import derive_scale_cliff as producer
 

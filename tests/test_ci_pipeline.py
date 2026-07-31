@@ -137,7 +137,9 @@ def test_ci_is_triggered_by_the_events_that_deliver_code() -> None:
     push = triggers.get("push") or {}
     assert not set(push) & filters, f"push is narrowed by {sorted(set(push) & filters)}"
     branches = push.get("branches", [])
-    assert "main" in branches, push
+    # A scalar `branches: mainline` would satisfy a substring test and narrow
+    # the trigger to a branch that does not exist.
+    assert isinstance(branches, list) and "main" in branches, push
     # A negative pattern excludes the branch that the line above still finds.
     assert not [pattern for pattern in branches if pattern.startswith("!")], branches
 
@@ -188,26 +190,48 @@ def test_no_job_the_publish_waits_on_can_mask_a_failure() -> None:
 
 
 def test_nothing_anywhere_is_allowed_to_fail_without_failing() -> None:
-    """`continue-on-error` has no honest use in this workflow, and the job the
-    others feed is not itself covered above — its own image scan decides whether
-    a vulnerable image is pushed, and the push step comes after it."""
-    workflow = _ci()
-    for name, job in workflow["jobs"].items():
+    """Tolerating an error has no honest use here, at any scope. Scoping this to
+    the jobs the publish waits on left out the job holding the image scan."""
+    for name, job in _ci()["jobs"].items():
         for scope in (job, *job.get("steps", [])):
             assert "continue-on-error" not in scope, name
 
 
-def test_the_publish_job_cannot_skip_its_own_scan() -> None:
-    """Its steps scan, then push. The publish steps are rightly conditional, so
-    a condition on the scan looks like more of the same — but it would ship the
-    image the scan never saw. One condition for the job means there is no second
-    one to switch a gate off with."""
-    docker = _ci()["jobs"]["docker"]
-    conditions = {step["if"] for step in docker["steps"] if "if" in step}
-    assert len(conditions) == 1, sorted(conditions)
-    assert "github.ref" in conditions.pop(), (
-        "the publish condition is not the ref check"
-    )
+PUBLISH_CONDITION = "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+
+
+def test_only_the_trailing_publish_steps_are_conditional() -> None:
+    """A condition on a gate is invisible in a green run: the step is skipped,
+    not failed. Publishing is rightly conditional and publishing happens last,
+    so the conditional steps must be the tail of their job and must carry the
+    one condition that means this is a merge. Counting DISTINCT conditions let a
+    gate wear a byte-identical copy of that condition and leave every pull
+    request unscanned."""
+    for name, job in _ci()["jobs"].items():
+        assert "if" not in job, f"{name} is switched off wholesale"
+        steps = job.get("steps", [])
+        conditional = [index for index, step in enumerate(steps) if "if" in step]
+        tail = list(range(len(steps) - len(conditional), len(steps)))
+        assert conditional == tail, f"{name}: {conditional} is not the tail"
+        for index in conditional:
+            assert steps[index]["if"] == PUBLISH_CONDITION, steps[index]["if"]
+
+
+def test_the_image_gates_the_readme_advertises_exist_and_can_fail() -> None:
+    """A scan that reports and exits zero is decoration, and so is one that was
+    deleted — the whole suite passes with the scan step removed. This file
+    exists to catch exactly that, and had never asked for these three."""
+    actions = {
+        step.get("uses", "").split("@")[0]: step
+        for job in _ci()["jobs"].values()
+        for step in job.get("steps", [])
+    }
+    scan = actions.get("aquasecurity/trivy-action")
+    assert scan, sorted(actions)
+    assert scan["with"]["exit-code"] == "1", scan["with"]
+    assert "CRITICAL" in scan["with"]["severity"], scan["with"]
+    assert "anchore/sbom-action" in actions, sorted(actions)
+    assert "hadolint/hadolint-action" in actions, sorted(actions)
 
 
 def _report(cases: str) -> str:
