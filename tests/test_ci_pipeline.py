@@ -120,19 +120,26 @@ def test_ci_is_triggered_by_the_events_that_deliver_code() -> None:
     passes. YAML reads a bare `on` as the boolean it spells."""
     triggers = _ci()[True]
     assert "pull_request" in triggers, sorted(triggers)
-    assert "main" in (triggers.get("push") or {}).get("branches", []), triggers
     # Naming the events is not enough: the filter keys under them are a closed
-    # set too, and any one can narrow the trigger down to nothing.
-    for event in ("push", "pull_request"):
-        narrowed = set(triggers.get(event) or {}) & {
-            "branches-ignore",
-            "paths",
-            "paths-ignore",
-            "tags",
-            "tags-ignore",
-            "types",
-        }
-        assert not narrowed, f"{event} is narrowed by {sorted(narrowed)}"
+    # set too, and any one can narrow the trigger down to nothing. `branches` is
+    # the exception only where the branch it must keep is checked as well.
+    filters = {
+        "branches-ignore",
+        "paths",
+        "paths-ignore",
+        "tags",
+        "tags-ignore",
+        "types",
+    }
+    assert not set(triggers.get("pull_request") or {}) & (filters | {"branches"}), (
+        f"pull requests are narrowed by {sorted(triggers['pull_request'])}"
+    )
+    push = triggers.get("push") or {}
+    assert not set(push) & filters, f"push is narrowed by {sorted(set(push) & filters)}"
+    branches = push.get("branches", [])
+    assert "main" in branches, push
+    # A negative pattern excludes the branch that the line above still finds.
+    assert not [pattern for pattern in branches if pattern.startswith("!")], branches
 
 
 def test_the_masking_key_check_rejects_every_key_it_claims_to_cover() -> None:
@@ -178,6 +185,29 @@ def test_no_job_the_publish_waits_on_can_mask_a_failure() -> None:
         assert _masking_keys(workflow, jobs[name]) == [], (
             f"{name}: {_masking_keys(workflow, jobs[name])}"
         )
+
+
+def test_nothing_anywhere_is_allowed_to_fail_without_failing() -> None:
+    """`continue-on-error` has no honest use in this workflow, and the job the
+    others feed is not itself covered above — its own image scan decides whether
+    a vulnerable image is pushed, and the push step comes after it."""
+    workflow = _ci()
+    for name, job in workflow["jobs"].items():
+        for scope in (job, *job.get("steps", [])):
+            assert "continue-on-error" not in scope, name
+
+
+def test_the_publish_job_cannot_skip_its_own_scan() -> None:
+    """Its steps scan, then push. The publish steps are rightly conditional, so
+    a condition on the scan looks like more of the same — but it would ship the
+    image the scan never saw. One condition for the job means there is no second
+    one to switch a gate off with."""
+    docker = _ci()["jobs"]["docker"]
+    conditions = {step["if"] for step in docker["steps"] if "if" in step}
+    assert len(conditions) == 1, sorted(conditions)
+    assert "github.ref" in conditions.pop(), (
+        "the publish condition is not the ref check"
+    )
 
 
 def _report(cases: str) -> str:

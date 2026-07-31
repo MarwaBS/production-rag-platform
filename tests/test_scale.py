@@ -81,6 +81,41 @@ def test_the_two_pools_are_the_same_size_and_share_no_word() -> None:
 
     assert len(producer.FOREIGN) == len(producer.VOCABULARY)
     assert not set(producer.FOREIGN) & set(producer.VOCABULARY)
+    # Built from the index and nothing else. A pool allowed to consult the query
+    # set could be picked to miss it, and would then hold flat by being absent.
+    assert producer.FOREIGN == [
+        f"unrelated{index}" for index in range(len(producer.VOCABULARY))
+    ]
+
+
+def _buckets(words: list[str]) -> set[int]:
+    import re
+
+    from app.embedder import _DIM, hashlib  # type: ignore[attr-defined]
+
+    return {
+        int(hashlib.md5(token.encode(), usedforsecurity=False).hexdigest(), 16) % _DIM
+        for word in words
+        for token in re.findall(r"[a-z0-9]+", word.lower())
+    }
+
+
+def test_the_control_still_lands_in_the_buckets_the_queries_use() -> None:
+    """A pool the retriever cannot see is not a control, it is an absence: it
+    would hold flat whatever the corpus did, and 'holds flat' is the whole
+    finding. A pool chosen to dodge the queries reaches none of their buckets;
+    197 words over 128 buckets reach any given bucket about four times in five,
+    so half of them is a floor no pool picked without looking will fall under."""
+    from evals.harness import QUERIES
+    from scripts import derive_scale_cliff as producer
+
+    queries = _buckets([query for query, _ in QUERIES])
+    assert queries, "fixture: the queries occupy no buckets"
+    reached = _buckets(producer.FOREIGN) & queries
+    assert len(reached) >= len(queries) // 2, (
+        f"the control reaches {len(reached)} of the queries' {len(queries)} "
+        "buckets: it competes too little to be evidence of anything"
+    )
 
 
 def test_the_curve_separates_the_document_count_from_the_words_they_use() -> None:
@@ -92,9 +127,11 @@ def test_the_curve_separates_the_document_count_from_the_words_they_use() -> Non
     curve, control = committed["recall_at_3"], committed["recall_at_3_control"]
     assert control.keys() == curve.keys(), "the control was measured elsewhere"
     sizes = sorted(int(size) for size in curve)
-    largest, smallest = str(sizes[-1]), str(sizes[0])
-    assert control[largest] == control[smallest], (
-        "the control no longer holds flat, so the attribution needs re-deriving"
+    largest = str(sizes[-1])
+    # Every size, not the two ends: the smallest is the corpus itself, where
+    # neither construction has produced a single distractor yet.
+    assert len(set(control.values())) == 1, (
+        f"the control no longer holds flat, so the attribution needs re-deriving: {control}"
     )
     assert curve[largest] < control[largest], (
         "reusing the corpus's words costs nothing, so there is nothing to explain"
