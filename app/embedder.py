@@ -46,8 +46,8 @@ def _semantic_embed(texts: List[str]) -> np.ndarray:
 
 
 def embed(texts: List[str]) -> np.ndarray:
-    # Consulted per call so env-var selection works however early this module
-    # was imported.
+    # Read off the settings object per call rather than captured into a
+    # constant, so the backend stays switchable; the env is read once, at import.
     if _settings.embedding_backend == "semantic":
         return _semantic_embed(texts)
     return _hash_embed(texts)

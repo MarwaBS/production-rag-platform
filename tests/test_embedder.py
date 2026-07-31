@@ -24,8 +24,8 @@ def test_an_unknown_backend_is_rejected_at_startup() -> None:
 
 
 def test_embed_dispatches_on_the_selected_backend(monkeypatch) -> None:
-    """`embed` must consult the setting on every call — a binding frozen at
-    import would make the CI job's env-var selection silently serve hashes."""
+    """`embed` must read the setting on every call — capturing the choice into a
+    module constant would make the backend unswitchable after import."""
     sentinel = np.ones((1, 4), dtype="float32")
     monkeypatch.setattr(embedder, "_semantic_embed", lambda texts: sentinel)
     monkeypatch.setattr(embedder._settings, "embedding_backend", "semantic")
