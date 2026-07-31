@@ -63,11 +63,16 @@ def test_ci_gates_the_paraphrase_eval_under_the_semantic_backend() -> None:
         "the semantic extra is installed but the semantic-marked gates never run"
     )
     for job in semantic_jobs:
-        assert "if" not in job, "the semantic job is conditioned off"
-        # A step-level condition leaves the job green and `needs` satisfied, so
-        # the publish still proceeds with the floor never executed.
-        assert not any("if" in step for step in job["steps"]), (
-            "a step of the semantic job is conditioned off"
+        # Anything that lets the job report success without running the floor
+        # leaves `needs` satisfied and publishes the image regardless: a
+        # condition, a tolerated failure, or a shell that swallows the status.
+        for scope in (job, *job["steps"]):
+            assert "if" not in scope, "the semantic gate is conditioned off"
+            assert not scope.get("continue-on-error"), (
+                "the semantic gate cannot fail the build"
+            )
+        assert "||" not in _runs(job), (
+            "a run line in the semantic job swallows its exit status"
         )
     assert "semantic" in jobs["docker"].get("needs", []), (
         "the image publish does not wait for the semantic gate"

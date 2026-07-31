@@ -123,15 +123,16 @@ def _multi_window_document() -> str:
 
 
 def test_retrieval_returns_the_window_that_carries_the_answer() -> None:
-    """The retrieval unit must be the window. Indexing whole documents instead
-    leaves every count in the response unchanged and surfaces only as evidence
-    that does not contain what was asked for."""
+    """The retrieval unit must be the window: the evidence has to carry the
+    answer AND be a window. Containment alone is satisfied by handing back the
+    whole document, which is the defect this exists to catch."""
     main._index = None
     body = client.post("/index", json={"documents": [_multi_window_document()]}).json()
     assert body["chunks"] > 1, "the fixture is not multi-window"
     hits = client.post("/query", json={"query": _MARKER, "k": 1}).json()["retrieved"]
     main._index = None
     assert hits and _MARKER in hits[0]["text"], hits
+    assert len(hits[0]["text"]) <= setting("max_chunk_chars"), len(hits[0]["text"])
 
 
 def test_the_answer_never_claims_more_documents_than_it_retrieved() -> None:
@@ -205,10 +206,39 @@ def test_the_producer_measures_sentences_rather_than_documents() -> None:
     corpus is one, so the artefact cannot tell the two apart — the split can."""
     from scripts.derive_chunking import _sentences
 
-    assert _sentences("One short. A second, rather longer sentence here.") == [
+    # Leading and trailing whitespace: the split alone would keep both, and a
+    # stray blank part would be counted as a sentence of its own.
+    assert _sentences("  One short.   A second, rather longer sentence.  ") == [
         "One short.",
-        "A second, rather longer sentence here.",
+        "A second, rather longer sentence.",
     ]
+
+
+@pytest.mark.semantic
+def test_the_window_derivation_holds_against_the_real_tokenizer() -> None:
+    """The producer records the model's limits as literals, so without this they
+    are numbers that happen to be right until the model changes."""
+    import json
+    import pathlib
+
+    from sentence_transformers import SentenceTransformer
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    derivation = json.loads(
+        (root / "chunking_derivation.json").read_text(encoding="utf-8")
+    )
+    model = SentenceTransformer(derivation["semantic_model"])
+    tokenizer = model.tokenizer
+    assert model.max_seq_length == derivation["model_token_limit"]
+    assert (
+        tokenizer.num_special_tokens_to_add(pair=False)
+        == derivation["special_tokens_reserved"]
+    )
+    window = derivation["embedder_window_chars"]
+    fits = tokenizer("漢" * window, truncation=False)["input_ids"]
+    over = tokenizer("漢" * (window + 1), truncation=False)["input_ids"]
+    assert len(fits) == model.max_seq_length, len(fits)
+    assert len(over) > model.max_seq_length, len(over)
 
 
 def test_the_type_checker_scaffold_is_removed_once_the_splitter_lands() -> None:
