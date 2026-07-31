@@ -78,6 +78,23 @@ def test_a_length_landing_on_a_boundary_emits_no_redundant_tail(length: int) -> 
     ), [len(piece) for piece in pieces]
 
 
+@pytest.mark.parametrize("length", [1, 99, 100, 101, 171, 250, 999])
+def test_every_character_of_the_input_lands_in_some_window(length: int) -> None:
+    """The promise in the splitter's own docstring. Dropping a window from the
+    end takes up to a stride of unique text out of the index with it, and every
+    gate above still passes: their sentence was never in the window that went."""
+    text = "".join(chr(0x100 + position) for position in range(length))
+    pieces = chunk(text, max_chars=MAX_CHARS, overlap_chars=OVERLAP)
+    covered: set[int] = set()
+    at = 0
+    for piece in pieces:
+        # Distinct characters throughout, so each window occurs once and the
+        # position found for it is the span it actually covers.
+        at = text.index(piece, at)
+        covered.update(range(at, at + len(piece)))
+    assert covered == set(range(length)), sorted(set(range(length)) - covered)[:8]
+
+
 def test_the_splitter_refuses_arguments_it_cannot_advance_through() -> None:
     """A non-positive stride appends windows until memory runs out instead of
     raising, so the refusal has to happen before the loop."""
@@ -117,12 +134,23 @@ def test_indexing_a_long_document_reports_more_chunks_than_documents() -> None:
 _MARKER = "quokka narwhal zebra"  # shares no token with the padding around it
 
 
+def _pad(length: int) -> str:
+    """Exactly `length` characters, never ending in whitespace: the request
+    contract strips edge whitespace and would shift every window."""
+    text = ("padding " * (length // 8 + 1))[:length]
+    return text[:-1] + "." if text.endswith(" ") else text
+
+
 def _multi_window_document() -> str:
-    # The marker sits in the MIDDLE: at either end, evidence that is merely a
-    # slice of the document would carry it and look like a window. No edge
-    # whitespace, or the request contract strips it and shifts every window.
-    half = ("padding " * (setting("max_chunk_chars") // 8)).strip()
-    return f"{half} {_MARKER} {half}"
+    # An EVEN number of windows, with the marker inside exactly one and clear of
+    # both its seams. Evidence that is merely a slice of the document cannot
+    # carry the marker without being a window; and with an odd count and a
+    # central marker, reversing the windows maps that one to itself.
+    window = setting("max_chunk_chars")
+    stride = window - setting("chunk_overlap_chars")
+    lead = window + 9
+    total = window + 2 * stride + stride // 2
+    return f"{_pad(lead)} {_MARKER} {_pad(total - lead - len(_MARKER) - 2)}"
 
 
 def _windows_of(document: str) -> list[str]:
@@ -156,6 +184,26 @@ def test_retrieval_returns_the_window_that_carries_the_answer() -> None:
     assert len(everything) == len(windows)
     for hit in everything:
         assert hit["id"].endswith(f":{windows.index(hit['text'])}"), hit["id"]
+
+
+def test_the_window_that_matched_is_the_window_that_was_embedded() -> None:
+    """Texts and vectors are two sequences joined by position alone. Reverse one
+    of them and every hit still names the text it carries, so nothing inside a
+    hit shows it — only asking for a phrase that lives in one window, and one
+    that does not map to itself when the order is turned around."""
+    document = _multi_window_document()
+    windows = _windows_of(document)
+    (carrying,) = [index for index, window in enumerate(windows) if _MARKER in window]
+    assert carrying != len(windows) - 1 - carrying, (
+        f"window {carrying} of {len(windows)} is its own mirror: the fixture is "
+        "symmetric under the defect it exists to catch"
+    )
+    main._index = None
+    client.post("/index", json={"documents": [document]})
+    hits = client.post("/query", json={"query": _MARKER, "k": 1}).json()["retrieved"]
+    main._index = None
+    assert hits, "the marker is indexed but unretrievable"
+    assert hits[0]["text"] == windows[carrying], hits[0]["id"]
 
 
 def test_the_answer_never_claims_more_documents_than_it_retrieved() -> None:

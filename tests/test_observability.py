@@ -39,6 +39,17 @@ def test_the_corpus_gauge_tracks_the_indexed_documents() -> None:
     assert sample("rag_corpus_documents") == 1.0
 
 
+def test_the_corpus_gauge_counts_documents_and_not_their_windows() -> None:
+    """Every document above fits one window, so the two counts are equal there
+    and either could be the number on the dashboard. One long document separates
+    them, and the series is labelled documents."""
+    body = client.post(
+        "/index", json={"documents": ["vectors " * main.settings.max_chunk_chars]}
+    ).json()
+    assert body["chunks"] > 1, "fixture: the document must span several windows"
+    assert sample("rag_corpus_documents") == 1.0
+
+
 def test_hit_scores_are_observed() -> None:
     """The score distribution is the earliest signal of retrieval decay: a
     corpus drifting away from its queries shows up here before users complain."""
