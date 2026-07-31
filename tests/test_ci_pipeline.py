@@ -58,6 +58,20 @@ def test_ci_audits_the_python_dependencies() -> None:
     ), "no run line invokes pip-audit"
 
 
+def _top_level(listing: str) -> set[str]:
+    """What each tracked path must be reachable as on a type-check command line:
+    its package for a file in one, the file itself for one at the root."""
+    paths = [pathlib.PurePosixPath(path) for path in listing.split("\0") if path]
+    return {path.parts[0] if len(path.parts) > 1 else path.name for path in paths}
+
+
+def test_the_type_check_argument_reader_does_not_overlook_a_root_level_file() -> None:
+    """Today every tracked module sits in a package, so a reader that silently
+    dropped root-level files would look right up until one appeared."""
+    listing = "app/main.py\0conftest.py\0tests/test_x.py\0a dir/mod.py\0"
+    assert _top_level(listing) == {"app", "conftest.py", "tests", "a dir"}
+
+
 def test_ci_type_checks_every_directory_that_ships_python() -> None:
     """The gate that fails the build on an unproven semantic run now lives in
     scripts/, which the type-check argument list did not name. Naming the
@@ -72,10 +86,10 @@ def test_ci_type_checks_every_directory_that_ships_python() -> None:
     assert invocation, "no run line invokes mypy"
     checked = {argument for line in invocation for argument in line.split()[1:]}
     tracked = subprocess.run(
-        ["git", "ls-files", "*.py"], capture_output=True, text=True, cwd=str(ROOT)
+        ["git", "ls-files", "-z", "*.py"], capture_output=True, text=True, cwd=str(ROOT)
     )
-    shipping = {path.split("/")[0] for path in tracked.stdout.split() if "/" in path}
-    assert shipping, "fixture: git listed no tracked python packages"
+    shipping = _top_level(tracked.stdout)
+    assert shipping, "fixture: git listed no tracked python files"
     assert shipping <= checked, sorted(shipping - checked)
 
 
@@ -107,6 +121,18 @@ def test_ci_is_triggered_by_the_events_that_deliver_code() -> None:
     triggers = _ci()[True]
     assert "pull_request" in triggers, sorted(triggers)
     assert "main" in (triggers.get("push") or {}).get("branches", []), triggers
+    # Naming the events is not enough: the filter keys under them are a closed
+    # set too, and any one can narrow the trigger down to nothing.
+    for event in ("push", "pull_request"):
+        narrowed = set(triggers.get(event) or {}) & {
+            "branches-ignore",
+            "paths",
+            "paths-ignore",
+            "tags",
+            "tags-ignore",
+            "types",
+        }
+        assert not narrowed, f"{event} is narrowed by {sorted(narrowed)}"
 
 
 def test_the_masking_key_check_rejects_every_key_it_claims_to_cover() -> None:
@@ -133,11 +159,25 @@ def test_ci_gates_the_paraphrase_eval_under_the_semantic_backend() -> None:
     for job in semantic_jobs:
         runs = [step.get("run", "").strip() for step in job["steps"]]
         assert PROVE_SEMANTIC in runs, runs
-        assert _masking_keys(workflow, job) == [], _masking_keys(workflow, job)
     assert (ROOT / "scripts" / "check_semantic_report.py").exists()
     assert "semantic" in jobs["docker"].get("needs", []), (
         "the image publish does not wait for the semantic gate"
     )
+
+
+def test_no_job_the_publish_waits_on_can_mask_a_failure() -> None:
+    """The jobs the image publish waits on are exactly the ones whose verdicts
+    decide anything, so those are the ones no masking key may sit on. Reading
+    them off `needs` covers a gate job added later; naming the semantic job
+    covered the one this check was written for."""
+    workflow = _ci()
+    jobs = workflow["jobs"]
+    gate_jobs = jobs["docker"].get("needs", [])
+    assert gate_jobs, "the image publish waits on nothing"
+    for name in gate_jobs:
+        assert _masking_keys(workflow, jobs[name]) == [], (
+            f"{name}: {_masking_keys(workflow, jobs[name])}"
+        )
 
 
 def _report(cases: str) -> str:

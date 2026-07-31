@@ -14,6 +14,8 @@ import pathlib
 import subprocess
 import sys
 
+import pytest
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -50,31 +52,29 @@ def test_the_committed_curve_records_the_degradation_it_documents() -> None:
     assert curve[str(sizes[-1])] < curve[str(sizes[0])], curve
 
 
-def test_the_control_changes_one_thing_about_the_shipped_construction() -> None:
-    """A control that also changes how fast unseen words arrive measures two
-    effects at once and can attribute neither. The two constructions must
-    introduce new vocabulary at the same rate and differ only in whether the
-    words they reuse are the ones the queries use."""
-    from scripts.derive_scale_cliff import VOCABULARY, _control, _distractor
+def test_the_control_is_the_shipped_construction_over_another_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Point the control at the corpus's own pool and it must come out as the
+    shipped distractor, character for character. Naming the variables to hold
+    still leaves every unnamed one free — word count, prefix, index arithmetic,
+    separators — and any of those moves the curve it is supposed to isolate."""
+    from scripts import derive_scale_cliff as producer
 
-    known = set(VOCABULARY)
+    monkeypatch.setattr(producer, "FOREIGN", producer.VOCABULARY)
+    for index in (0, 1, 7, 196, 197, 1_000, 9_975):
+        assert producer._control(index, producer.VOCABULARY) == producer._distractor(
+            index, producer.VOCABULARY
+        ), index
 
-    def novel(make, count: int) -> int:
-        return len(
-            {
-                token
-                for index in range(count)
-                for token in make(index, VOCABULARY).split()
-            }
-            - known
-        )
 
-    rates = [novel(make, 2000) - novel(make, 1000) for make in (_distractor, _control)]
-    assert rates[0] == rates[1], rates
-    shipped = {t for i in range(1000) for t in _distractor(i, VOCABULARY).split()}
-    control = {t for i in range(1000) for t in _control(i, VOCABULARY).split()}
-    assert shipped & known, "the shipped distractors reuse none of the corpus's words"
-    assert not (control & known), "the control reuses the corpus's own words"
+def test_the_two_pools_are_the_same_size_and_share_no_word() -> None:
+    """Swapping pools only isolates the wording if the pools are otherwise
+    alike: a shorter one would repeat sooner, a longer one would compete more."""
+    from scripts import derive_scale_cliff as producer
+
+    assert len(producer.FOREIGN) == len(producer.VOCABULARY)
+    assert not set(producer.FOREIGN) & set(producer.VOCABULARY)
 
 
 def test_the_curve_separates_the_document_count_from_the_words_they_use() -> None:
