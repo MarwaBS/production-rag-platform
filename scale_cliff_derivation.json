@@ -2,8 +2,8 @@
   "embedder": "hash",
   "embedder_dimensions": 128,
   "queries": "evals.harness.QUERIES",
-  "gold_documents": 12,
-  "distractor_construction": "note<i> plus 8 words drawn from the corpus's own vocabulary; the size of the fall depends on this overlap",
+  "queries_evaluated": 12,
+  "distractor_construction": "note<i> plus 8 words cycling through the corpus's own vocabulary, which repeats every 197 documents. What grows with corpus size is therefore the unique note<i> vocabulary, and that is what aliases into the buckets",
   "recall_at_3": {
     "24": 1.0,
     "100": 1.0,

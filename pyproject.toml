@@ -59,8 +59,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 # The semantic marker covers gates that measure meaning rather than word
-# overlap. Deselected by default because the shipped embedder matches words, so
-# a base install cannot satisfy them; they become runnable when the semantic
-# embedding backend lands and are selected with `-m semantic`.
+# overlap. Deselected by default because a base install cannot satisfy them;
+# install the `semantic` extra and select them with `-m semantic`.
 addopts = "-ra -m 'not semantic'"
 markers = ["semantic: needs a semantic embedder; not satisfiable by the shipped one"]

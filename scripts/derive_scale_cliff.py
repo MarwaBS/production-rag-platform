@@ -1,9 +1,9 @@
 """Producer for the corpus-scale curve (scale_cliff_derivation.json).
 
 Measures recall@3 of the literal query set through the service's own /index and
-/query as the corpus grows, on the default hash backend. How far it falls
-depends on how much vocabulary the competing documents share, so the distractor
-construction is recorded beside the numbers rather than left implied.
+/query as the corpus grows, on the default hash backend. What falls is driven by
+how much DISTINCT vocabulary the corpus carries, since that is what aliases into
+the 128 buckets, so the distractor construction is recorded with the numbers.
 
 Run: python scripts/derive_scale_cliff.py            # rewrite the committed file
      python scripts/derive_scale_cliff.py --print    # print, no write (CI gate)
@@ -39,6 +39,7 @@ def _distractor(index: int, vocabulary: list[str]) -> str:
 def derive() -> dict:
     from fastapi.testclient import TestClient
 
+    import app.embedder as embedder
     import app.main as main
 
     vocabulary = sorted(
@@ -67,12 +68,14 @@ def derive() -> dict:
         main._index = previous
     return {
         "embedder": "hash",
-        "embedder_dimensions": 128,
+        "embedder_dimensions": embedder._DIM,
         "queries": "evals.harness.QUERIES",
-        "gold_documents": len(QUERIES),
+        "queries_evaluated": len(QUERIES),
         "distractor_construction": (
-            f"note<i> plus {DISTRACTOR_WORDS} words drawn from the corpus's own "
-            "vocabulary; the size of the fall depends on this overlap"
+            f"note<i> plus {DISTRACTOR_WORDS} words cycling through the corpus's "
+            f"own vocabulary, which repeats every {len(vocabulary)} documents. "
+            "What grows with corpus size is therefore the unique note<i> "
+            "vocabulary, and that is what aliases into the buckets"
         ),
         "recall_at_3": curve,
     }

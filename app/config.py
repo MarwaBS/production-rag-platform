@@ -30,9 +30,10 @@ class Settings(BaseSettings):
     # meaning via sentence-transformers and needs the extra.
     embedding_backend: Literal["hash", "semantic"] = "hash"
     default_top_k: int = Field(default=3, ge=1)
-    # Input-contract bounds. Judgement calls sized to the reference pod's
-    # 512Mi memory limit, not derivations; the tests pin that each bound exists
-    # and bites, not its value.
+    # Input-contract bounds. Judgement calls sized to the reference pod's 512Mi
+    # limit, not derivations; the tests pin that each bound exists and bites,
+    # not its value. Chunking multiplies them: a document at the char bound
+    # becomes tens of windows, so vectors scale with windows, not documents.
     max_documents: int = Field(default=10_000, ge=1)
     max_document_chars: int = Field(default=8_000, ge=1)
     max_query_chars: int = Field(default=1_000, ge=1)

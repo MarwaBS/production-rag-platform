@@ -31,7 +31,8 @@
   "semantic_model": "sentence-transformers/all-MiniLM-L6-v2",
   "model_token_limit": 256,
   "special_tokens_reserved": 2,
-  "worst_case_chars_per_token": 1,
+  "assumed_chars_per_wordpiece": 1,
+  "assumption_limit": "text whose characters cost one wordpiece each; scripts that cost more per character can still overflow the sequence limit",
   "embedder_window_chars": 254,
   "derived_defaults": {
     "chunk_overlap_chars": 83,

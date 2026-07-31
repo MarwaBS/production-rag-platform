@@ -7,7 +7,9 @@
 #
 # Runtime dependencies are intentionally NOT pinned here: the package is a
 # reference service installed with range requirements, and the Docker image /
-# SBOM capture the exact runtime versions actually shipped.
+# SBOM capture the exact runtime versions actually shipped. The exception is
+# below: the semantic stack is a runtime dependency a committed measurement
+# compares against byte-for-byte, so it is pinned like a tool.
 ruff==0.15.20
 mypy==2.1.0
 pytest==9.1.1

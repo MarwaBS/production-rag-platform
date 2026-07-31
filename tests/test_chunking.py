@@ -80,8 +80,7 @@ def test_a_length_landing_on_a_boundary_emits_no_redundant_tail(length: int) -> 
 
 def test_the_splitter_refuses_arguments_it_cannot_advance_through() -> None:
     """A non-positive stride appends windows until memory runs out instead of
-    raising, so the refusal has to happen before the loop. The wide-overlap case
-    comes first because it is the one an unguarded splitter still returns from."""
+    raising, so the refusal has to happen before the loop."""
     with pytest.raises(ValueError):
         chunk("text", max_chars=10, overlap_chars=10)
     with pytest.raises(ValueError):

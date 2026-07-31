@@ -2,9 +2,11 @@
 
 `chunk_overlap_chars` := the longest sentence in the shipped reference corpus
 (the sentences the eval guarantees intact). `max_chunk_chars` := the semantic
-model's 256-token limit less the two special tokens it adds; measured, 254
-one-character tokens fill exactly 256 places and 255 truncate. Worst case is
-one character per token, so this reproduces with no model installed.
+model's 256-token limit less the two special tokens it adds, at one wordpiece
+per character. Those three constants are literals here so this reproduces with
+no model installed; a semantic-marked gate holds them against the real
+tokenizer. The assumption bounds text whose characters cost a wordpiece each —
+scripts that cost more per character can still overflow the limit.
 
 Run: python scripts/derive_chunking.py            # rewrite the committed file
      python scripts/derive_chunking.py --print    # print, no write (CI gate)
@@ -44,7 +46,11 @@ def derive() -> dict:
         "semantic_model": "sentence-transformers/all-MiniLM-L6-v2",
         "model_token_limit": token_limit,
         "special_tokens_reserved": special_tokens,
-        "worst_case_chars_per_token": chars_per_token,
+        "assumed_chars_per_wordpiece": chars_per_token,
+        "assumption_limit": (
+            "text whose characters cost one wordpiece each; scripts that cost "
+            "more per character can still overflow the sequence limit"
+        ),
         "embedder_window_chars": window,
         "derived_defaults": {
             "chunk_overlap_chars": lengths[-1],
