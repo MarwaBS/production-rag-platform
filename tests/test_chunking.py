@@ -276,10 +276,10 @@ def test_the_shipped_overlap_is_wide_enough_for_the_sentence_it_guarantees() -> 
 
 
 def test_the_shipped_constants_carry_a_sentence_of_the_measured_length() -> None:
-    """The two numbers agree, and agreeing is not the guarantee. The overlap is
-    the longest sentence measured, which puts the stride exactly on the bound
-    where a span that long still fits in one window — one character either way
-    and it does not. Only splitting such a span at every offset can see that."""
+    """The two numbers agree, and agreeing is not the guarantee. A span of
+    length L survives whole while the stride stays at or under max_chars - L + 1;
+    the shipped pair sits one character inside that, so a two-character loss of
+    overlap breaks it. Only splitting such a span at every offset can see it."""
     import json
     import pathlib
 
