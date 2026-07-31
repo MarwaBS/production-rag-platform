@@ -125,7 +125,9 @@ def evaluate(
     previous = main._index  # the eval must not leave its corpus behind
     try:
         response = client.post("/index", json={"documents": list(CORPUS)})
-        assert response.status_code == 201, response.text
+        if response.status_code != 201:
+            # Not an assert: this is library code, and -O would delete the check.
+            raise RuntimeError(f"indexing the eval corpus failed: {response.text}")
         ranks: list[int] = []  # 1-based rank of the gold doc, 0 if outside top-k
         misses: list[str] = []
         for query, gold in queries if queries is not None else QUERIES:

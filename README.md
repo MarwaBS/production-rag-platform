@@ -134,10 +134,15 @@ Full summaries in **[docs/decisions/](docs/decisions/)**:
 ## CI/CD
 
 **This repository's own CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push and PR:
-`ruff` lint · `mypy` · `pytest` integration tests · a **retrieval eval gate** ([`evals/`](evals/) — recall@k
-over a fixed Q/gold set through the real embed+store+retrieve path, floored in [`tests/test_eval.py`](tests/test_eval.py)
-so a retrieval regression fails the build) · `helm lint` + `helm template` render · `hadolint` on the
-Dockerfile · Docker image build · **Trivy** image scan · **CycloneDX SBOM** generation (uploaded as an artifact).
+`ruff` lint + format check · `mypy` · `pip-audit` on the source tree's dependencies · `pytest` integration
+tests **under an 85% coverage floor** · a **retrieval eval gate** ([`evals/`](evals/) — recall@k over a fixed
+Q/gold set driven through the service's own `/index` and `/query`, floored in [`tests/test_eval.py`](tests/test_eval.py)
+so a retrieval regression fails the build) · a separate **`semantic` job** that installs the optional
+sentence-transformers extra and runs the paraphrase floors, which the default word-matching embedder cannot
+satisfy — it emits a JUnit report and [`scripts/check_semantic_report.py`](scripts/check_semantic_report.py)
+fails the build unless every semantic gate appears in it as having passed · `helm lint` + `helm template`
+render · `hadolint` on the Dockerfile · Docker image build · **Trivy** image scan · **CycloneDX SBOM**
+generation (uploaded as an artifact). The image publish waits on the test, semantic and IaC jobs together.
 On merge to `main` it also pushes the scanned image to GHCR.
 
 The eval here is a *retrieval*-quality gate (the shipped Mock LLM makes generation a fixed template). The

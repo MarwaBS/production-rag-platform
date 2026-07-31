@@ -51,6 +51,10 @@ def derive() -> dict:
         embedder._settings.embedding_backend = "semantic"
     n = len(paraphrased)
     baseline = semantic["paraphrase"]
+    # The default path is gated too, and against its own measurement: floors
+    # derived from the semantic instrument are far below what it actually does.
+    default_baseline = hash_measown["literal"]
+    default_n = len(QUERIES)
     return {
         "baseline": "semantic backend on the zero-overlap paraphrase set",
         "semantic_model": "sentence-transformers/all-MiniLM-L6-v2",
@@ -65,6 +69,11 @@ def derive() -> dict:
         },
         "derived_floors": {
             metric: round(value - 0.5 / n, 4) for metric, value in baseline.items()
+        },
+        "n_literal_queries": default_n,
+        "derived_floors_default_path": {
+            metric: round(value - 0.5 / default_n, 4)
+            for metric, value in default_baseline.items()
         },
     }
 

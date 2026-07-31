@@ -1,8 +1,9 @@
 """Text embedding behind one function, backend selected by APP_EMBEDDING_BACKEND.
 
-The default hash embedder matches words, not meaning: a paraphrase sharing no
-token scores zero, and its 128 buckets alias as vocabulary grows (measured in
-scale_cliff_derivation.json). The paraphrase floors assume the semantic extra.
+The default hash embedder matches words, not meaning: it retrieves few of the
+paraphrases that share no token with their document, and its 128 buckets alias
+as vocabulary grows. Both are measured, in eval_floors_derivation.json and
+scale_cliff_derivation.json; the paraphrase floors assume the semantic extra.
 """
 
 from __future__ import annotations

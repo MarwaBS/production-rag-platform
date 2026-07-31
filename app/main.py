@@ -205,11 +205,9 @@ class _Index:
 
     Held behind a single module-level reference so /index swaps the whole
     snapshot in one atomic assignment and /query reads one consistent
-    (docs, store) pair. The previous design stored docs and store under two
-    separate dict keys and read them in two steps, so a /query interleaved with
-    a re-index could pair a new store with stale docs (or vice versa) and raise
-    IndexError. A single reference makes that torn read impossible by
-    construction.
+    (windows, store) pair. Read in two steps, a /query interleaved with a
+    re-index could pair a new store with stale windows and raise IndexError; a
+    single reference makes that torn read impossible by construction.
 
     Atomicity caveat: the lock-free swap relies on a single name rebind being
     atomic, which holds under CPython's GIL (the supported runtime here, and the
@@ -220,7 +218,6 @@ class _Index:
     corpus to a shared external store).
     """
 
-    docs: tuple[str, ...]
     # One row per retrieval window, aligned with the store's vector rows:
     # (window text, "docid:ordinal" id, parent doc id).
     windows: tuple[tuple[str, str, str], ...]
@@ -519,7 +516,7 @@ def index(req: IndexRequest, _: None = Depends(require_api_key)) -> Dict[str, in
     store = get_vector_store(settings.vector_backend)
     store.add(embed([text for text, _, _ in windows]))
     global _index
-    _index = _Index(docs=tuple(docs), windows=tuple(windows), store=store)
+    _index = _Index(windows=tuple(windows), store=store)
     _CORPUS_DOCS.set(len(docs))
     # Counts only — document CONTENT never goes to the logs.
     logger.info(

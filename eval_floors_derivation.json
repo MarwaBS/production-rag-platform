@@ -30,5 +30,11 @@
     "recall_at_1": 0.6731,
     "recall_at_3": 0.9039,
     "mrr": 0.7757
+  },
+  "n_literal_queries": 12,
+  "derived_floors_default_path": {
+    "recall_at_1": 0.875,
+    "recall_at_3": 0.9583,
+    "mrr": 0.9166
   }
 }

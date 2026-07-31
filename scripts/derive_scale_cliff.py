@@ -22,7 +22,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from evals.harness import CORPUS, QUERIES  # noqa: E402
 
-CORPUS_SIZES = (24, 100, 1_000, 10_000)
+CORPUS_SIZES: tuple[int, ...] = (24, 100, 1_000, 10_000)
 DISTRACTOR_WORDS = 8
 
 
@@ -58,7 +58,10 @@ def derive() -> dict:
                 _distractor(index, vocabulary) for index in range(size - len(CORPUS))
             ]
             indexed = client.post("/index", json={"documents": documents}).json()
-            assert indexed["indexed"] == size, f"dedup shrank the corpus: {indexed}"
+            if indexed["indexed"] != size:
+                # A construction that repeats measures a few hundred documents
+                # while reporting the size it meant to measure.
+                raise RuntimeError(f"dedup shrank the corpus: {indexed}")
             found = 0
             for query, gold in QUERIES:
                 body = client.post("/query", json={"query": query, "k": 3}).json()

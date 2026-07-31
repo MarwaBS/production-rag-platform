@@ -55,7 +55,11 @@ jobs:
       - name: Install with the semantic extra
         run: pip install -e ".[dev,semantic]" -c constraints-dev.txt
       - name: Paraphrase floor + floor-derivation reproduce (semantic-marked gates)
-        run: pytest -q -m semantic
+        run: pytest -q -m semantic --junitxml=semantic-report.xml
+      - name: Prove every semantic gate actually ran
+        # The job's exit status is not evidence: a collection-only run or a
+        # swallowed status also exits zero. The report is.
+        run: python scripts/check_semantic_report.py semantic-report.xml
 
   iac:
     runs-on: ubuntu-latest
