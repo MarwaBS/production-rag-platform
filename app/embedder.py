@@ -2,7 +2,8 @@
 
 The default hash embedder matches WORDS: reproducible and download-free, but a
 paraphrase sharing no token with its document scores zero, and its 128 buckets
-alias distinct tokens as vocabulary grows past the bounded reference corpus.
+alias distinct tokens as vocabulary grows past the bounded reference corpus —
+measured in scale_cliff_derivation.json.
 The "semantic" backend (sentence-transformers extra) matches meaning and is
 what the paraphrase eval floor is measured against.
 """
