@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # Chunking constants are DERIVED, not chosen — scripts/derive_chunking.py
     # measures them and commits chunking_derivation.json; a gate re-runs the
     # producer and pins these defaults against it.
-    max_chunk_chars: int = Field(default=256, ge=1)
+    max_chunk_chars: int = Field(default=254, ge=1)
     chunk_overlap_chars: int = Field(default=83, ge=1)
     # LLM resilience: timeout, bounded retry, consecutive-failure breaker.
     # Judgement calls, APP_-overridable; the tests pin the behaviour of each
@@ -61,6 +61,17 @@ class Settings(BaseSettings):
             raise ValueError(
                 "APP_ENV=production requires APP_API_KEY to be set: without it "
                 "/index and /query are open to anyone who can reach the pod"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _the_overlap_must_fit_inside_the_window(self) -> Settings:
+        # Independent bounds, so this pairing is reachable from the environment.
+        # It leaves the splitter unable to advance, which is a boot-time death.
+        if self.chunk_overlap_chars >= self.max_chunk_chars:
+            raise ValueError(
+                f"APP_CHUNK_OVERLAP_CHARS ({self.chunk_overlap_chars}) must be "
+                f"smaller than APP_MAX_CHUNK_CHARS ({self.max_chunk_chars})"
             )
         return self
 

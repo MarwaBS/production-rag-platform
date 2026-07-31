@@ -30,10 +30,11 @@
   "longest_sentence_chars": 83,
   "semantic_model": "sentence-transformers/all-MiniLM-L6-v2",
   "model_token_limit": 256,
+  "special_tokens_reserved": 2,
   "worst_case_chars_per_token": 1,
-  "embedder_window_chars": 256,
+  "embedder_window_chars": 254,
   "derived_defaults": {
     "chunk_overlap_chars": 83,
-    "max_chunk_chars": 256
+    "max_chunk_chars": 254
   }
 }

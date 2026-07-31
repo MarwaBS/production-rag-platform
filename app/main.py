@@ -243,7 +243,7 @@ def _grounded_answer(hits: List[Dict[str, Any]]) -> str:
     """Default-path answer that carries its own evidence, not just a count."""
     top = hits[0]
     return (
-        f"Grounded in {len(hits)} document(s); "
+        f"Grounded in {len(hits)} passage(s); "
         f"best evidence [{top['id']}]: {top['text']}"
     )
 
