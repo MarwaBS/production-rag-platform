@@ -49,20 +49,19 @@ def test_the_committed_curve_records_the_degradation_it_documents() -> None:
 
 
 def test_the_curve_separates_competition_volume_from_vocabulary_growth() -> None:
-    """More documents costs recall on its own. Charging the whole fall to the
-    distractors' new vocabulary needs a control at the same sizes that adds no
-    token the corpus did not already have; the gap between the two is the cost
-    of the vocabulary, and it is the only part the buckets explain."""
+    """Documents the queries share no word with still crowd the buckets, so the
+    fall is not all competition on wording. The control holds the wording still
+    and measures the buckets alone; the gap to the shipped curve is the rest."""
     committed = _committed()
     curve, control = committed["recall_at_3"], committed["recall_at_3_control"]
     assert control.keys() == curve.keys(), "the control was measured elsewhere"
     sizes = sorted(int(size) for size in curve)
     largest, smallest = str(sizes[-1]), str(sizes[0])
     assert control[largest] < control[smallest], (
-        "the control does not fall, so volume alone would explain nothing"
+        "the buckets cost nothing on their own, so the control explains nothing"
     )
     assert curve[largest] < control[largest], (
-        "the new vocabulary costs nothing beyond the volume that carries it"
+        "same-domain wording costs nothing beyond the crowding it arrives with"
     )
 
 

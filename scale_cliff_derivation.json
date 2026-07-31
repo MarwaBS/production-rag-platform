@@ -3,11 +3,18 @@
   "embedder_dimensions": 128,
   "queries": "evals.harness.QUERIES",
   "queries_evaluated": 12,
-  "distractor_construction": "note<i> plus 8 words cycling through the corpus's own vocabulary, which repeats every 197 documents. What grows with corpus size is therefore the unique note<i> vocabulary, and that is what aliases into the buckets",
+  "distractor_construction": "note<i> plus 8 words cycling through the corpus's own vocabulary, which repeats every 197 documents: same-domain competition on the words the queries themselves use",
+  "control_construction": "the same document length in tokens the corpus does not contain, so the only competition left is aliasing into the buckets. The gap between the two curves is what the same-domain wording costs",
   "recall_at_3": {
     "24": 1.0,
     "100": 1.0,
     "1000": 1.0,
     "10000": 0.75
+  },
+  "recall_at_3_control": {
+    "24": 1.0,
+    "100": 1.0,
+    "1000": 1.0,
+    "10000": 0.9167
   }
 }
