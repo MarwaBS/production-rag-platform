@@ -66,6 +66,12 @@ def test_the_control_is_the_shipped_construction_over_another_pool(
         assert producer._control(index, producer.VOCABULARY) == producer._distractor(
             index, producer.VOCABULARY
         ), index
+    # And it must be the pool doing that: a control reading the corpus's words
+    # directly matches under the swap above while ignoring the pool entirely.
+    monkeypatch.setattr(producer, "FOREIGN", ["elsewhere"] * len(producer.VOCABULARY))
+    assert producer._control(0, producer.VOCABULARY) != producer._distractor(
+        0, producer.VOCABULARY
+    )
 
 
 def test_the_two_pools_are_the_same_size_and_share_no_word() -> None:
