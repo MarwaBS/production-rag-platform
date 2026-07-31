@@ -27,7 +27,7 @@ jobs:
       - name: Format check
         run: ruff format --check .
       - name: Type-check
-        run: mypy app evals tests
+        run: mypy app evals scripts tests
       - name: Audit Python dependencies (pip-audit)
         # Trivy scans the built image; this catches a vulnerable pin at PR
         # time, before an image is ever built.
