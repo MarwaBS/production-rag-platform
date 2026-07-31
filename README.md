@@ -2,7 +2,7 @@
 
 A deployable reference RAG service that grounds every generated answer in the caller's own documents — served behind a typed API and shipped with the full production envelope: containerized, Kubernetes-deployable, observable, CI-gated.
 
-**[Open infrastructure: rag-llm-infra](https://pypi.org/project/rag-llm-infra/)** (the published package this service runs on) · the private flagship product built on the same design, ResumeForge, is [live here](https://resumeforge-bg29.onrender.com) (separate codebase — see the boundary table below)
+**[Open infrastructure: rag-llm-infra](https://pypi.org/project/rag-llm-infra/)** (the published package this service runs on) · a private flagship product is built on the same design in a separate codebase — see the boundary table below
 
 Stack: FastAPI · rag-llm-infra · NumPy retrieval (FAISS/Qdrant optional) · Prometheus · structured JSON logs · Docker · Kubernetes/Helm · GitHub Actions
 
@@ -31,16 +31,14 @@ Kubernetes-deployable, observable, and CI/CD-gated.
 >
 > | | Runs in this repo (`app/`) | Design context only |
 > |---|---|---|
-> | **What** | A runnable reference RAG service on the published [`rag-llm-infra`](https://pypi.org/project/rag-llm-infra/) package | ADRs + the "full system" diagram for a separate **private** product (ResumeForge) |
+> | **What** | A runnable reference RAG service on the published [`rag-llm-infra`](https://pypi.org/project/rag-llm-infra/) package | ADRs + the "full system" diagram for a separate **private** product |
 > | **Includes** | typed config · auth + input validation · `/index` `/query` `/health` `/ready` `/metrics` · structured logs · Helm chart · Dockerfile | Redis cache · arq workers · OTel tracing · semantic validation · PDF output · rate limiting |
 > | **Status** | real, runs locally, **CI-gated** (image build + Trivy · integration tests · Helm lint+render · hadolint · SBOM) | the proprietary generation logic is **not** in this repo |
 >
 > Sections below are labelled _"full system"_ when they describe the private architecture, so you
 > can always tell what executes here from what's design context.
 
-**Run it in 30 seconds** — [jump to quickstart](#run-the-reference-service). The private product
-ResumeForge is live at **[resumeforge-bg29.onrender.com](https://resumeforge-bg29.onrender.com)**
-(a separate codebase — *not* this service; free tier, ~30s cold start).
+**Run it in 30 seconds** — [jump to quickstart](#run-the-reference-service).
 
 ## Run the reference service
 
@@ -129,7 +127,7 @@ Full summaries in **[docs/decisions/](docs/decisions/)**:
 
 - **Container** — multi-stage `python:3.12.8-slim-bookworm`, runs as a non-root user, Trivy-scanned in CI: **[deploy/Dockerfile](deploy/Dockerfile)**.
 - **Orchestration** — single-replica Helm chart (Deployment / Service / Ingress / ServiceAccount / Secret; HPA + PDB templates ship but are disabled by default because the index is in-process — see [values.yaml](deploy/helm/values.yaml)): **[deploy/helm/](deploy/helm/)**. The **Ingress is disabled by default** (secure default): a bare install exposes nothing publicly. Opt in with `ingress.enabled=true` only alongside `APP_API_KEY` (so `/index` + `/query` require a key) and `tls.enabled=true` with a real cert.
-- **Image publishing** — on merge to `main`, CI builds the image and pushes `:latest`, a commit-SHA tag, and the chart's `appVersion` tag (so a bare `helm install` resolves an image that exists) to GHCR. This repo does **not** auto-deploy anywhere; the live demo above is the separate ResumeForge product.
+- **Image publishing** — on merge to `main`, CI builds the image and pushes `:latest`, a commit-SHA tag, and the chart's `appVersion` tag (so a bare `helm install` resolves an image that exists) to GHCR. This repo does **not** auto-deploy anywhere.
 
 ## CI/CD
 

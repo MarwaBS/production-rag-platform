@@ -1,6 +1,6 @@
 # CI/CD pipeline STRUCTURE — ILLUSTRATIVE DOCUMENTATION, NOT AN EXECUTED WORKFLOW.
 #
-# This sketches the fuller pipeline of the PRIVATE production system (ResumeForge).
+# This sketches the fuller pipeline of a separate PRIVATE production system.
 # It is intentionally kept under docs/ (not .github/workflows/) so it never runs here,
 # and it references components that live in that private codebase — e.g.
 # requirements-dev.txt, an `evals` module + evaluation gate, integration-marked tests,
