@@ -1,9 +1,8 @@
 """What the default embedder does once the corpus outgrows the reference size.
 
 Its 128 buckets alias distinct vocabulary, so gold documents fall out of the
-top 3 as competition grows. That is a bounded-reference limitation rather than a
-bug — but an unmeasured limitation reads as a capability, so the curve is
-measured, committed, and re-measured here.
+top 3 as competition grows. An unmeasured limitation reads as a capability, so
+the curve is measured, committed, and re-measured here.
 """
 
 from __future__ import annotations

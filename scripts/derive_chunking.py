@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
@@ -21,8 +22,18 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from evals.harness import CORPUS  # noqa: E402 — needs the repo root on sys.path
 
 
+def _sentences(document: str) -> list[str]:
+    # The guarantee is stated per sentence, so measure sentences: every line of
+    # this corpus happens to be one, and a corpus of prose would not be.
+    return [
+        part.strip() for part in re.split(r"(?<=[.!?])\s+", document) if part.strip()
+    ]
+
+
 def derive() -> dict:
-    lengths = sorted(len(document) for document in CORPUS)
+    lengths = sorted(
+        len(sentence) for document in CORPUS for sentence in _sentences(document)
+    )
     token_limit, special_tokens, chars_per_token = 256, 2, 1
     window = (token_limit - special_tokens) * chars_per_token
     return {

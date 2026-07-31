@@ -54,13 +54,9 @@ def _paraphrased() -> tuple[tuple[str, str], ...]:
 
 
 def test_the_default_embedder_cannot_match_a_paraphrase() -> None:
-    """Records what the shipped bag-of-tokens embedder actually does.
-
-    It matches words, not meaning, so a query that shares no word with its
-    document is beyond it. That is a limitation, not a bug — but an unrecorded
-    limitation becomes an implied capability, and this is the number that keeps
-    the published floor from being read as a claim about semantic retrieval.
-    """
+    """Records what the shipped bag-of-tokens embedder cannot do: match a query
+    sharing no word with its document. An unrecorded limitation reads as a
+    capability, and this keeps the floor from implying semantic retrieval."""
     result = evaluate(k=3, queries=_paraphrased())
     assert result.recall_at_k < RECALL_AT_3_FLOOR, (
         "the default embedder now clears the paraphrase floor — if the semantic "

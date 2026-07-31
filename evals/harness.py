@@ -10,9 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Fixed corpus: one distinct-topic document per line. The first twelve are the
-# gold documents; the rest are adjacent-topic distractors that give the ranking
-# real competition — without them, top-3 over a tiny corpus is trivially
+# One distinct-topic document per line: the first twelve are gold, the rest are
+# adjacent-topic distractors. Without them a top-3 over so small a corpus is
 # saturated and no floor derived from it can discriminate.
 CORPUS: tuple[str, ...] = (
     "FAISS performs in-process vector similarity search using inner-product indexes",
@@ -41,11 +40,9 @@ CORPUS: tuple[str, ...] = (
     "A service mesh injects sidecars that encrypt and route pod traffic",
 )
 
-# Paraphrases of the same twelve questions, sharing NO word with their gold
-# document (asserted in tests). The literal set below measures whether tokens can
-# be matched; this set measures whether MEANING can be, which is what a retrieval
-# system is for. A query set drawn from its own gold documents' vocabulary cannot
-# tell the two apart.
+# Paraphrases sharing NO word with their gold document (asserted in tests). The
+# literal set below measures token matching; this one measures meaning, which a
+# query set drawn from its gold documents' vocabulary cannot tell apart.
 PARAPHRASE_QUERIES: tuple[tuple[str, int], ...] = (
     ("cosine nearest neighbour lookup across embedding matrices", 0),
     ("hosted engine holding embeddings queried by remote procedure call", 1),

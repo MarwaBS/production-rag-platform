@@ -1,7 +1,6 @@
 """Sliding-window splitter. Windows advance by (max_chars - overlap_chars), so
-any span no longer than the overlap survives whole in at least one window —
-the overlap width is derived from measured sentence lengths by
-scripts/derive_chunking.py, not chosen."""
+any span no longer than the overlap survives whole in one window; the overlap
+is derived by scripts/derive_chunking.py, not chosen."""
 
 from __future__ import annotations
 

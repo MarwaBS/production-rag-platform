@@ -65,6 +65,19 @@ def test_a_word_wider_than_the_window_is_split_rather_than_dropped() -> None:
     assert "".join(pieces).count("z") >= 250
 
 
+@pytest.mark.parametrize("length", [160, 220, 280])
+def test_a_length_landing_on_a_boundary_emits_no_redundant_tail(length: int) -> None:
+    """Off by one, the stop test appends a final window wholly inside the one
+    before it — an extra vector and a duplicate hit for the same text."""
+    text = "".join(chr(0x100 + position) for position in range(length))
+    pieces = chunk(text, max_chars=MAX_CHARS, overlap_chars=OVERLAP)
+    assert not any(
+        later in earlier
+        for index, earlier in enumerate(pieces)
+        for later in pieces[index + 1 :]
+    ), [len(piece) for piece in pieces]
+
+
 def test_the_splitter_refuses_arguments_it_cannot_advance_through() -> None:
     """A non-positive stride appends windows until memory runs out instead of
     raising, so the refusal has to happen before the loop. The wide-overlap case
@@ -131,6 +144,7 @@ def test_the_answer_never_claims_more_documents_than_it_retrieved() -> None:
     hits = body["retrieved"]
     documents = {hit["doc_id"] for hit in hits}
     assert len(hits) > len(documents), "the fixture returned one window per document"
+    assert len({hit["id"] for hit in hits}) == len(hits), "windows share a chunk id"
     claimed = re.search(r"(\d+) document\(s\)", body["answer"])
     assert claimed is None or int(claimed.group(1)) <= len(documents), body["answer"]
 
