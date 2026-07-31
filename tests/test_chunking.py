@@ -142,10 +142,8 @@ def _pad(length: int) -> str:
 
 
 def _multi_window_document() -> str:
-    # An EVEN number of windows, with the marker inside exactly one and clear of
-    # both its seams. Evidence that is merely a slice of the document cannot
-    # carry the marker without being a window; and with an odd count and a
-    # central marker, reversing the windows maps that one to itself.
+    # An EVEN number of windows with the marker inside exactly one: an odd count
+    # and a central marker maps that window to itself when the order is reversed.
     window = setting("max_chunk_chars")
     stride = window - setting("chunk_overlap_chars")
     lead = window + 9
@@ -275,6 +273,29 @@ def test_the_shipped_overlap_is_wide_enough_for_the_sentence_it_guarantees() -> 
     defaults = measured["derived_defaults"]
     assert setting("chunk_overlap_chars") == defaults["chunk_overlap_chars"]
     assert setting("max_chunk_chars") == defaults["max_chunk_chars"]
+
+
+def test_the_shipped_constants_carry_a_sentence_of_the_measured_length() -> None:
+    """The two numbers agree, and agreeing is not the guarantee. The overlap is
+    the longest sentence measured, which puts the stride exactly on the bound
+    where a span that long still fits in one window — one character either way
+    and it does not. Only splitting such a span at every offset can see that."""
+    import json
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    longest = json.loads(
+        (root / "chunking_derivation.json").read_text(encoding="utf-8")
+    )["longest_sentence_chars"]
+    window, overlap = setting("max_chunk_chars"), setting("chunk_overlap_chars")
+    span = "q" * longest
+    for offset in range(2 * window):
+        text = "p" * offset + span + "p" * (2 * window)
+        pieces = chunk(text, max_chars=window, overlap_chars=overlap)
+        assert any(span in piece for piece in pieces), (
+            f"a {longest}-character span is fractured at offset {offset} by "
+            f"max_chars={window}, overlap_chars={overlap}"
+        )
 
 
 def test_the_producer_measures_sentences_rather_than_documents() -> None:

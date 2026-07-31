@@ -24,7 +24,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 PROVE_SEMANTIC = "python scripts/check_semantic_report.py"
 
 
-def _ci() -> Dict[str, Any]:
+def _ci() -> Dict[Any, Any]:
+    # Not str-keyed: YAML 1.1 reads the bare `on` trigger key as a boolean.
     return yaml.safe_load(
         (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     )
@@ -99,6 +100,15 @@ def _masking_keys(workflow: Dict[str, Any], job: Dict[str, Any]) -> List[str]:
     return problems
 
 
+def test_ci_is_triggered_by_the_events_that_deliver_code() -> None:
+    """The most complete mask is not a key on a step. A workflow no push and no
+    pull request triggers never runs at all, and every gate in this file still
+    passes. YAML reads a bare `on` as the boolean it spells."""
+    triggers = _ci()[True]
+    assert "pull_request" in triggers, sorted(triggers)
+    assert "main" in (triggers.get("push") or {}).get("branches", []), triggers
+
+
 def test_the_masking_key_check_rejects_every_key_it_claims_to_cover() -> None:
     """It returns nothing on the shipped file — which is also what a check
     looking at keys that cannot occur returns."""
@@ -132,6 +142,11 @@ def test_ci_gates_the_paraphrase_eval_under_the_semantic_backend() -> None:
 
 def _report(cases: str) -> str:
     return f"<testsuites><testsuite>{cases}</testsuite></testsuites>"
+
+
+def _junitxml(argv: List[str]) -> pathlib.Path:
+    option = next(arg for arg in argv if arg.startswith("--junitxml="))
+    return pathlib.Path(option.split("=", 1)[1])
 
 
 def _case(name: str, outcome: str = "") -> str:
@@ -219,9 +234,7 @@ def test_the_checker_reads_only_a_report_the_run_it_started_wrote() -> None:
     seen: Dict[str, Any] = {}
 
     def runner(argv: List[str], cwd: str) -> int:
-        target = pathlib.Path(
-            next(arg for arg in argv if arg.startswith("--junitxml=")).split("=", 1)[1]
-        )
+        target = _junitxml(argv)
         seen["path"] = target
         seen["existed"] = target.exists()
         seen["cwd"] = cwd
@@ -246,11 +259,16 @@ def test_the_checker_reads_only_a_report_the_run_it_started_wrote() -> None:
 
 def test_an_empty_marker_set_is_not_a_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     """Nothing required means every report satisfies it — a gate that certifies
-    an empty suite is the vacuous case this whole check exists to reject."""
+    an empty suite is the vacuous case this whole check exists to reject. The
+    run has to write its report, or this passes on the missing file instead."""
     from scripts import check_semantic_report as checker
 
+    def runner(argv: List[str], cwd: str) -> int:
+        _junitxml(argv).write_text(_report(""), encoding="utf-8")
+        return 0
+
     monkeypatch.setattr(checker, "required_tests", set)
-    assert checker.check(runner=lambda argv, cwd: 0)
+    assert checker.check(runner=runner)
 
 
 def test_the_checker_fails_the_build_when_the_gates_are_not_proven(
