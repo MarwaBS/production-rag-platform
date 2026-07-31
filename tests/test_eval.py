@@ -16,22 +16,36 @@ import pytest
 import evals.harness as harness
 from evals.harness import evaluate
 
-_FLOORS = json.loads(
+_DERIVATION = json.loads(
     (
         pathlib.Path(__file__).resolve().parent.parent / "eval_floors_derivation.json"
     ).read_text(encoding="utf-8")
-)["derived_floors"]
+)
+_FLOORS = _DERIVATION["derived_floors"]
 RECALL_AT_1_FLOOR = _FLOORS["recall_at_1"]
 RECALL_AT_3_FLOOR = _FLOORS["recall_at_3"]
 MRR_FLOOR = _FLOORS["mrr"]
+# The default path is held to its own measurement: the semantic floors sit far
+# below what it does on the literal set, so they would not notice a regression.
+_DEFAULT_FLOORS = _DERIVATION["derived_floors_default_path"]
 
 
 def test_retrieval_meets_recall_floor() -> None:
     top1 = evaluate(k=1)
     top3 = evaluate(k=3)
-    assert top1.recall_at_k >= RECALL_AT_1_FLOOR, top1.summary()
-    assert top3.recall_at_k >= RECALL_AT_3_FLOOR, top3.summary()
-    assert top3.mrr >= MRR_FLOOR, top3.summary()
+    assert top1.recall_at_k >= _DEFAULT_FLOORS["recall_at_1"], top1.summary()
+    assert top3.recall_at_k >= _DEFAULT_FLOORS["recall_at_3"], top3.summary()
+    assert top3.mrr >= _DEFAULT_FLOORS["mrr"], top3.summary()
+
+
+def test_the_eval_leaves_the_service_index_as_it_found_it() -> None:
+    """The eval indexes its own corpus through /index. A run that does not put
+    the previous snapshot back changes what every later caller retrieves."""
+    import app.main as main
+
+    main._index = None
+    evaluate(k=1)
+    assert main._index is None, "the eval left its own corpus indexed in the service"
 
 
 def test_paraphrase_queries_share_no_word_with_their_gold_document() -> None:
@@ -88,9 +102,9 @@ def test_each_floor_is_load_bearing_through_the_serving_path(monkeypatch) -> Non
         main, "embed", lambda texts: np.ones((len(texts), 128), dtype="float32")
     )
     top1, top3 = evaluate(k=1), evaluate(k=3)
-    assert top1.recall_at_k < RECALL_AT_1_FLOOR, top1.summary()
-    assert top3.recall_at_k < RECALL_AT_3_FLOOR, top3.summary()
-    assert top3.mrr < MRR_FLOOR, top3.summary()
+    assert top1.recall_at_k < _DEFAULT_FLOORS["recall_at_1"], top1.summary()
+    assert top3.recall_at_k < _DEFAULT_FLOORS["recall_at_3"], top3.summary()
+    assert top3.mrr < _DEFAULT_FLOORS["mrr"], top3.summary()
 
 
 def test_the_floors_are_derived_from_a_committed_measured_baseline() -> None:
@@ -113,12 +127,13 @@ def test_the_floors_are_derived_from_a_committed_measured_baseline() -> None:
         f"the baseline is saturated ({baseline}); floors derived from it "
         "cannot discriminate"
     )
+
     # Recompute the floors from the measurement: reading the same key back out
     # of the same file compares it against itself and cannot fail.
-    n = derivation["n_paraphrase_queries"]
-    recomputed = {
-        metric: round(value - 0.5 / n, 4) for metric, value in baseline.items()
-    }
+    def floors_from(measured: dict, n: int) -> dict:
+        return {metric: round(value - 0.5 / n, 4) for metric, value in measured.items()}
+
+    recomputed = floors_from(baseline, derivation["n_paraphrase_queries"])
     assert derivation["derived_floors"] == recomputed, (
         f"the published floors do not follow {derivation['floor_rule']!r}"
     )
@@ -126,6 +141,10 @@ def test_the_floors_are_derived_from_a_committed_measured_baseline() -> None:
         recomputed["recall_at_1"],
         recomputed["recall_at_3"],
         recomputed["mrr"],
+    )
+    # The default path's floors follow the same rule from its own measurement.
+    assert _DEFAULT_FLOORS == floors_from(
+        derivation["measured"]["hash_literal"], derivation["n_literal_queries"]
     )
 
 

@@ -118,20 +118,37 @@ _MARKER = "quokka narwhal zebra"  # shares no token with the padding around it
 
 
 def _multi_window_document() -> str:
-    return ("padding " * (setting("max_chunk_chars") // 4)) + _MARKER
+    # The marker sits in the MIDDLE: at either end, evidence that is merely a
+    # slice of the document would carry it and look like a window.
+    half = "padding " * (setting("max_chunk_chars") // 8)
+    return f"{half}{_MARKER} {half}"
+
+
+def _windows_of(document: str) -> list[str]:
+    return chunk(
+        document,
+        max_chars=setting("max_chunk_chars"),
+        overlap_chars=setting("chunk_overlap_chars"),
+    )
 
 
 def test_retrieval_returns_the_window_that_carries_the_answer() -> None:
-    """The retrieval unit must be the window: the evidence has to carry the
-    answer AND be a window. Containment alone is satisfied by handing back the
-    whole document, which is the defect this exists to catch."""
+    """The retrieval unit must BE a window the splitter produced. Anything
+    weaker — a short string, a slice containing the answer — is satisfied by
+    slicing the document, which loses everything not on the slice."""
+    document = _multi_window_document()
+    windows = _windows_of(document)
+    assert len(windows) > 1, "the fixture is not multi-window"
     main._index = None
-    body = client.post("/index", json={"documents": [_multi_window_document()]}).json()
-    assert body["chunks"] > 1, "the fixture is not multi-window"
+    body = client.post("/index", json={"documents": [document]}).json()
+    assert body["chunks"] == len(windows)
     hits = client.post("/query", json={"query": _MARKER, "k": 1}).json()["retrieved"]
     main._index = None
-    assert hits and _MARKER in hits[0]["text"], hits
-    assert len(hits[0]["text"]) <= setting("max_chunk_chars"), len(hits[0]["text"])
+    assert hits, "the marker is indexed but unretrievable"
+    assert hits[0]["text"] in windows, hits[0]["text"]
+    assert _MARKER in hits[0]["text"]
+    # The ordinal has to name the window's position, not merely be unique.
+    assert hits[0]["id"].endswith(f":{windows.index(hits[0]['text'])}")
 
 
 def test_the_answer_never_claims_more_documents_than_it_retrieved() -> None:
@@ -145,8 +162,13 @@ def test_the_answer_never_claims_more_documents_than_it_retrieved() -> None:
     documents = {hit["doc_id"] for hit in hits}
     assert len(hits) > len(documents), "the fixture returned one window per document"
     assert len({hit["id"] for hit in hits}) == len(hits), "windows share a chunk id"
-    claimed = re.search(r"(\d+) document\(s\)", body["answer"])
-    assert claimed is None or int(claimed.group(1)) <= len(documents), body["answer"]
+    # Whatever the count is called, if it is called documents it must be one:
+    # matching the exact spelling would miss "documents" for "document(s)".
+    claimed = re.search(r"grounded in (\d+) (\S+)", body["answer"].lower())
+    assert claimed, body["answer"]
+    noun = re.sub(r"[^a-z]", "", claimed.group(2)).rstrip("s")
+    assert int(claimed.group(1)) == len(hits), body["answer"]
+    assert noun != "document" or len(hits) <= len(documents), body["answer"]
 
 
 def test_the_shipped_overlap_is_wide_enough_for_the_sentence_it_guarantees() -> None:
@@ -205,11 +227,12 @@ def test_the_producer_measures_sentences_rather_than_documents() -> None:
     corpus is one, so the artefact cannot tell the two apart — the split can."""
     from scripts.derive_chunking import _sentences
 
-    # Leading and trailing whitespace: the split alone would keep both, and a
-    # stray blank part would be counted as a sentence of its own.
-    assert _sentences("  One short.   A second, rather longer sentence.  ") == [
-        "One short.",
-        "A second, rather longer sentence.",
+    # Leading and trailing whitespace, and all three terminators: the split
+    # alone keeps the padding, and a blank tail counts as a sentence of its own.
+    assert _sentences("  Short? Then this! A third, rather longer sentence.  ") == [
+        "Short?",
+        "Then this!",
+        "A third, rather longer sentence.",
     ]
 
 

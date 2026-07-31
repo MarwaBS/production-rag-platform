@@ -46,3 +46,33 @@ def test_the_committed_curve_records_the_degradation_it_documents() -> None:
     curve = _committed()["recall_at_3"]
     sizes = sorted(int(size) for size in curve)
     assert curve[str(sizes[-1])] < curve[str(sizes[0])], curve
+
+
+def test_the_producer_refuses_a_corpus_that_dedup_would_shrink() -> None:
+    """Distractors that repeat measure a few hundred documents while reporting
+    the size they meant to: the collapse is silent unless the producer checks."""
+    import pytest
+
+    from scripts import derive_scale_cliff
+
+    original = derive_scale_cliff._distractor
+    derive_scale_cliff._distractor = lambda index, vocabulary: "identical"
+    try:
+        with pytest.raises(RuntimeError, match="dedup shrank the corpus"):
+            derive_scale_cliff.derive()
+    finally:
+        derive_scale_cliff._distractor = original
+
+
+def test_the_recorded_embedder_width_follows_the_embedder() -> None:
+    """Recorded as a matching literal it would keep saying 128 after the
+    embedder changed, and the field would be decoration."""
+    import app.embedder as embedder
+    from scripts import derive_scale_cliff
+
+    original_dim, original_sizes = embedder._DIM, derive_scale_cliff.CORPUS_SIZES
+    embedder._DIM, derive_scale_cliff.CORPUS_SIZES = 7, (24,)
+    try:
+        assert derive_scale_cliff.derive()["embedder_dimensions"] == 7
+    finally:
+        embedder._DIM, derive_scale_cliff.CORPUS_SIZES = original_dim, original_sizes
