@@ -190,8 +190,7 @@ def test_no_job_the_publish_waits_on_can_mask_a_failure() -> None:
 
 
 def test_nothing_anywhere_is_allowed_to_fail_without_failing() -> None:
-    """Tolerating an error has no honest use here, at any scope. Scoping this to
-    the jobs the publish waits on left out the job holding the image scan."""
+    """Tolerating an error has no honest use in this workflow, at any scope."""
     for name, job in _ci()["jobs"].items():
         for scope in (job, *job.get("steps", [])):
             assert "continue-on-error" not in scope, name
@@ -199,15 +198,100 @@ def test_nothing_anywhere_is_allowed_to_fail_without_failing() -> None:
 
 PUBLISH_CONDITION = "github.event_name == 'push' && github.ref == 'refs/heads/main'"
 
+# What the README's CI section sells. A claim in prose that no step implements
+# fails nothing when it disappears, which is what this file exists to catch.
+ADVERTISED_COMMANDS = (
+    "ruff check .",
+    "ruff format --check .",
+    "mypy ",
+    "pip-audit",
+    "--cov-fail-under=85",
+    "python -m evals",
+    "helm lint",
+    "helm template",
+    PROVE_SEMANTIC,
+)
+ADVERTISED_ACTIONS = (
+    "docker/build-push-action",
+    "aquasecurity/trivy-action",
+    "anchore/sbom-action",
+    "actions/upload-artifact",
+    "hadolint/hadolint-action",
+)
 
-def test_only_the_trailing_publish_steps_are_conditional() -> None:
+
+def _steps(workflow: Dict[Any, Any]) -> List[Dict[str, Any]]:
+    return [step for job in workflow["jobs"].values() for step in job.get("steps", [])]
+
+
+def _action(workflow: Dict[Any, Any], name: str) -> List[Dict[str, Any]]:
+    return [s for s in _steps(workflow) if s.get("uses", "").split("@")[0] == name]
+
+
+def _gate_steps(workflow: Dict[Any, Any]) -> List[Dict[str, Any]]:
+    """Steps that decide a verdict, as against the step that publishes."""
+    gates = []
+    for step in _steps(workflow):
+        if (step.get("with") or {}).get("push"):
+            continue
+        run, action = step.get("run", ""), step.get("uses", "").split("@")[0]
+        if action in ADVERTISED_ACTIONS or any(c in run for c in ADVERTISED_COMMANDS):
+            gates.append(step)
+    return gates
+
+
+def test_every_command_the_readme_advertises_runs_in_the_pipeline() -> None:
+    """Each is sold as a gate, and deleting any of their steps was silent."""
+    everything = "\n".join(_runs(job) for job in _ci()["jobs"].values())
+    for command in ADVERTISED_COMMANDS:
+        assert command in everything, command
+
+
+def test_every_action_the_readme_advertises_is_present_and_can_fail() -> None:
+    """Present is half of it: a scan that reports and exits zero, or a linter
+    whose threshold excuses everything, is decoration with a green tick."""
+    workflow = _ci()
+    for name in ADVERTISED_ACTIONS:
+        assert _action(workflow, name), name
+    for step in _steps(workflow):
+        # A moving ref changes the gate without changing the file.
+        assert not step.get("uses", "").endswith(("@master", "@main")), step["uses"]
+    scan = _action(workflow, "aquasecurity/trivy-action")[0]["with"]
+    assert scan["exit-code"] == "1", scan
+    assert "CRITICAL" in scan["severity"], scan
+    lint = _action(workflow, "hadolint/hadolint-action")[0]["with"]
+    assert lint["failure-threshold"] == "error", lint
+    assert (ROOT / lint["dockerfile"]).is_file(), lint
+
+
+def test_what_gets_scanned_is_what_gets_built() -> None:
+    """The scan names an image by tag. Any other tag scans something else and
+    passes, while the image that ships was never looked at."""
+    workflow = _ci()
+    loaded = [s for s in _steps(workflow) if (s.get("with") or {}).get("load")]
+    assert len(loaded) == 1, loaded
+    tag = loaded[0]["with"]["tags"].strip()
+    assert _action(workflow, "aquasecurity/trivy-action")[0]["with"]["image-ref"] == tag
+    assert _action(workflow, "anchore/sbom-action")[0]["with"]["image"] == tag
+
+
+def test_the_publish_waits_on_every_other_job() -> None:
+    """Waiting on some of them publishes while the rest are still failing."""
+    jobs = _ci()["jobs"]
+    assert set(jobs["docker"]["needs"]) == set(jobs) - {"docker"}, jobs["docker"]
+
+
+def test_no_gate_step_is_conditional_and_publishing_comes_last() -> None:
     """A condition on a gate is invisible in a green run: the step is skipped,
-    not failed. Publishing is rightly conditional and publishing happens last,
-    so the conditional steps must be the tail of their job and must carry the
-    one condition that means this is a merge. Counting DISTINCT conditions let a
-    gate wear a byte-identical copy of that condition and leave every pull
-    request unscanned."""
-    for name, job in _ci()["jobs"].items():
+    not failed. Publishing is rightly conditional, so the conditional steps must
+    be the tail of their job and carry the one condition that means this is a
+    merge — and every gate must be unconditional, which is what puts it before
+    them. Position alone does not: a gate that is also conditional sits happily
+    in that tail, running after the image it was meant to vet has been pushed."""
+    workflow = _ci()
+    for step in _gate_steps(workflow):
+        assert "if" not in step, step.get("name") or step.get("uses")
+    for name, job in workflow["jobs"].items():
         assert "if" not in job, f"{name} is switched off wholesale"
         steps = job.get("steps", [])
         conditional = [index for index, step in enumerate(steps) if "if" in step]
@@ -215,23 +299,6 @@ def test_only_the_trailing_publish_steps_are_conditional() -> None:
         assert conditional == tail, f"{name}: {conditional} is not the tail"
         for index in conditional:
             assert steps[index]["if"] == PUBLISH_CONDITION, steps[index]["if"]
-
-
-def test_the_image_gates_the_readme_advertises_exist_and_can_fail() -> None:
-    """A scan that reports and exits zero is decoration, and so is one that was
-    deleted — the whole suite passes with the scan step removed. This file
-    exists to catch exactly that, and had never asked for these three."""
-    actions = {
-        step.get("uses", "").split("@")[0]: step
-        for job in _ci()["jobs"].values()
-        for step in job.get("steps", [])
-    }
-    scan = actions.get("aquasecurity/trivy-action")
-    assert scan, sorted(actions)
-    assert scan["with"]["exit-code"] == "1", scan["with"]
-    assert "CRITICAL" in scan["with"]["severity"], scan["with"]
-    assert "anchore/sbom-action" in actions, sorted(actions)
-    assert "hadolint/hadolint-action" in actions, sorted(actions)
 
 
 def _report(cases: str) -> str:
