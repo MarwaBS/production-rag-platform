@@ -119,9 +119,10 @@ _MARKER = "quokka narwhal zebra"  # shares no token with the padding around it
 
 def _multi_window_document() -> str:
     # The marker sits in the MIDDLE: at either end, evidence that is merely a
-    # slice of the document would carry it and look like a window.
-    half = "padding " * (setting("max_chunk_chars") // 8)
-    return f"{half}{_MARKER} {half}"
+    # slice of the document would carry it and look like a window. No edge
+    # whitespace, or the request contract strips it and shifts every window.
+    half = ("padding " * (setting("max_chunk_chars") // 8)).strip()
+    return f"{half} {_MARKER} {half}"
 
 
 def _windows_of(document: str) -> list[str]:
@@ -143,12 +144,18 @@ def test_retrieval_returns_the_window_that_carries_the_answer() -> None:
     body = client.post("/index", json={"documents": [document]}).json()
     assert body["chunks"] == len(windows)
     hits = client.post("/query", json={"query": _MARKER, "k": 1}).json()["retrieved"]
+    # Every window's ordinal must name its position, not merely be unique — one
+    # hit cannot show that, since a middle window survives being reversed.
+    everything = client.post(
+        "/query", json={"query": "padding", "k": len(windows)}
+    ).json()["retrieved"]
     main._index = None
     assert hits, "the marker is indexed but unretrievable"
     assert hits[0]["text"] in windows, hits[0]["text"]
     assert _MARKER in hits[0]["text"]
-    # The ordinal has to name the window's position, not merely be unique.
-    assert hits[0]["id"].endswith(f":{windows.index(hits[0]['text'])}")
+    assert len(everything) == len(windows)
+    for hit in everything:
+        assert hit["id"].endswith(f":{windows.index(hit['text'])}"), hit["id"]
 
 
 def test_the_answer_never_claims_more_documents_than_it_retrieved() -> None:

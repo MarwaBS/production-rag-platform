@@ -75,6 +75,12 @@ def test_ci_gates_the_paraphrase_eval_under_the_semantic_backend() -> None:
         assert "scripts/check_semantic_report.py semantic-report.xml" in runs, (
             "nothing checks that the semantic gates appear in the report"
         )
+        # The report closes the open-ended space of shell tricks. These are the
+        # closed set of workflow keys that can mask a step's status instead.
+        for scope in (job, *job["steps"]):
+            for key in ("if", "continue-on-error", "shell"):
+                assert key not in scope, f"the semantic gate carries {key!r}"
+    assert "defaults" not in _ci(), "workflow defaults can redefine every shell"
     assert (ROOT / "scripts" / "check_semantic_report.py").exists()
     assert "semantic" in jobs["docker"].get("needs", []), (
         "the image publish does not wait for the semantic gate"
