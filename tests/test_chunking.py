@@ -13,10 +13,14 @@ the overlap: it must be at least as wide as the longest sentence to be guarantee
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 import app.main as main
+from app.config import Settings
 from app.main import app
 
 client = TestClient(app)
@@ -61,6 +65,23 @@ def test_a_word_wider_than_the_window_is_split_rather_than_dropped() -> None:
     assert "".join(pieces).count("z") >= 250
 
 
+def test_the_splitter_refuses_arguments_it_cannot_advance_through() -> None:
+    """A non-positive stride appends windows until memory runs out instead of
+    raising, so the refusal has to happen before the loop. The wide-overlap case
+    comes first because it is the one an unguarded splitter still returns from."""
+    with pytest.raises(ValueError):
+        chunk("text", max_chars=10, overlap_chars=10)
+    with pytest.raises(ValueError):
+        chunk("text", max_chars=0, overlap_chars=0)
+
+
+def test_an_overlap_as_wide_as_the_window_is_refused_at_startup() -> None:
+    """The two bounds are independent env-settable fields, so the pairing is
+    reachable; it must die at boot, not on every /index."""
+    with pytest.raises(ValidationError):
+        Settings(max_chunk_chars=100, chunk_overlap_chars=100)
+
+
 def setting(name: str) -> int:
     value = getattr(main.settings, name, None)
     assert value is not None, f"Settings.{name} does not exist"
@@ -79,6 +100,39 @@ def test_indexing_a_long_document_reports_more_chunks_than_documents() -> None:
     main._index = None
     assert body["indexed"] == 1
     assert body["chunks"] > 1
+
+
+_MARKER = "quokka narwhal zebra"  # shares no token with the padding around it
+
+
+def _multi_window_document() -> str:
+    return ("padding " * (setting("max_chunk_chars") // 4)) + _MARKER
+
+
+def test_retrieval_returns_the_window_that_carries_the_answer() -> None:
+    """The retrieval unit must be the window. Indexing whole documents instead
+    leaves every count in the response unchanged and surfaces only as evidence
+    that does not contain what was asked for."""
+    main._index = None
+    body = client.post("/index", json={"documents": [_multi_window_document()]}).json()
+    assert body["chunks"] > 1, "the fixture is not multi-window"
+    hits = client.post("/query", json={"query": _MARKER, "k": 1}).json()["retrieved"]
+    main._index = None
+    assert hits and _MARKER in hits[0]["text"], hits
+
+
+def test_the_answer_never_claims_more_documents_than_it_retrieved() -> None:
+    """Hits are windows now, so counting them as documents turns one document
+    into several apparently corroborating sources."""
+    main._index = None
+    client.post("/index", json={"documents": [_multi_window_document()]})
+    body = client.post("/query", json={"query": f"padding {_MARKER}", "k": 3}).json()
+    main._index = None
+    hits = body["retrieved"]
+    documents = {hit["doc_id"] for hit in hits}
+    assert len(hits) > len(documents), "the fixture returned one window per document"
+    claimed = re.search(r"(\d+) document\(s\)", body["answer"])
+    assert claimed is None or int(claimed.group(1)) <= len(documents), body["answer"]
 
 
 def test_the_shipped_overlap_is_wide_enough_for_the_sentence_it_guarantees() -> None:
@@ -125,6 +179,11 @@ def test_the_shipped_overlap_is_wide_enough_for_the_sentence_it_guarantees() -> 
     assert setting("max_chunk_chars") <= measured["embedder_window_chars"], (
         "the window must not exceed what the embedder can actually represent"
     )
+    # Bounds alone let a shipped default drift away from the measurement it
+    # claims to come from, so pin each default to the producer's own output.
+    defaults = measured["derived_defaults"]
+    assert setting("chunk_overlap_chars") == defaults["chunk_overlap_chars"]
+    assert setting("max_chunk_chars") == defaults["max_chunk_chars"]
 
 
 def test_the_type_checker_scaffold_is_removed_once_the_splitter_lands() -> None:

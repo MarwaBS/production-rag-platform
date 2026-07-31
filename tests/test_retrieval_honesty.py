@@ -237,6 +237,12 @@ def test_the_same_document_indexed_twice_is_one_document() -> None:
     hits = client.post(
         "/query", json={"query": "vector similarity search", "k": 3}
     ).json()["retrieved"]
+    # Both fixture documents fit inside one window, so hits are 1:1 with
+    # documents here; what follows is a claim about dedup, not about windowing.
+    assert all(
+        len(document) <= main.settings.max_chunk_chars
+        for document in (CORPUS[0], CORPUS[1])
+    )
     assert len({hit["doc_id"] for hit in hits}) == len(hits), (
         "a document was cited twice"
     )

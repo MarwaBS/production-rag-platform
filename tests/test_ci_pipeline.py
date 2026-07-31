@@ -64,6 +64,11 @@ def test_ci_gates_the_paraphrase_eval_under_the_semantic_backend() -> None:
     )
     for job in semantic_jobs:
         assert "if" not in job, "the semantic job is conditioned off"
+        # A step-level condition leaves the job green and `needs` satisfied, so
+        # the publish still proceeds with the floor never executed.
+        assert not any("if" in step for step in job["steps"]), (
+            "a step of the semantic job is conditioned off"
+        )
     assert "semantic" in jobs["docker"].get("needs", []), (
         "the image publish does not wait for the semantic gate"
     )

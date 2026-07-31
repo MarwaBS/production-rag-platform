@@ -117,10 +117,20 @@ def test_the_floors_are_derived_from_a_committed_measured_baseline() -> None:
         f"the baseline is saturated ({baseline}); floors derived from it "
         "cannot discriminate"
     )
-    floors = derivation["derived_floors"]
-    assert RECALL_AT_1_FLOOR == floors["recall_at_1"]
-    assert RECALL_AT_3_FLOOR == floors["recall_at_3"]
-    assert MRR_FLOOR == floors["mrr"]
+    # Recompute the floors from the measurement: reading the same key back out
+    # of the same file compares it against itself and cannot fail.
+    n = derivation["n_paraphrase_queries"]
+    recomputed = {
+        metric: round(value - 0.5 / n, 4) for metric, value in baseline.items()
+    }
+    assert derivation["derived_floors"] == recomputed, (
+        f"the published floors do not follow {derivation['floor_rule']!r}"
+    )
+    assert (RECALL_AT_1_FLOOR, RECALL_AT_3_FLOOR, MRR_FLOOR) == (
+        recomputed["recall_at_1"],
+        recomputed["recall_at_3"],
+        recomputed["mrr"],
+    )
 
 
 @pytest.mark.semantic
