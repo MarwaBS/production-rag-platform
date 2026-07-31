@@ -11,20 +11,26 @@ from __future__ import annotations
 import pathlib
 import subprocess
 import sys
-from typing import Any
+from typing import Any, Dict, List
 
+import pytest
 import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
+# The whole run line, not a substring of it. `: python scripts/...` contains the
+# substring and executes nothing; the checker takes no argument so that the
+# assertion below can be an equality rather than a search.
+PROVE_SEMANTIC = "python scripts/check_semantic_report.py"
 
-def _ci() -> dict[str, Any]:
+
+def _ci() -> Dict[str, Any]:
     return yaml.safe_load(
         (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     )
 
 
-def _runs(job: dict[str, Any]) -> str:
+def _runs(job: Dict[str, Any]) -> str:
     return "\n".join(step.get("run", "") for step in job.get("steps", []))
 
 
@@ -51,36 +57,52 @@ def test_ci_audits_the_python_dependencies() -> None:
     ), "no run line invokes pip-audit"
 
 
+def _masking_keys(workflow: Dict[str, Any], job: Dict[str, Any]) -> List[str]:
+    """Keys that can mask a step's status without editing its run line.
+
+    Enumerating them is sound only because GitHub defines them — unlike shell
+    spellings, the set is closed. `shell` is a step key and a defaults key; at
+    job scope it does not exist, so asserting its absence there proves nothing.
+    """
+    problems = []
+    for scope, where in ((workflow, "workflow"), (job, "job")):
+        if "defaults" in scope:
+            problems.append(f"{where} defaults can redefine every shell")
+    for key in ("if", "continue-on-error"):
+        if key in job:
+            problems.append(f"the job carries {key}")
+    for step in job.get("steps", []):
+        for key in ("if", "continue-on-error", "shell"):
+            if key in step:
+                problems.append(f"a step carries {key}")
+    return problems
+
+
+def test_the_masking_key_check_rejects_every_key_it_claims_to_cover() -> None:
+    """It returns nothing on the shipped file — which is also what a check
+    looking at keys that cannot occur returns."""
+    clean: Dict[str, Any] = {"steps": [{"run": PROVE_SEMANTIC}]}
+    assert _masking_keys({}, clean) == []
+    shell = {"run": {"shell": "bash -c :"}}
+    assert _masking_keys({"defaults": shell}, clean)
+    assert _masking_keys({}, {**clean, "defaults": shell})
+    for key in ("if", "continue-on-error"):
+        assert _masking_keys({}, {**clean, key: "x"})
+        assert _masking_keys({}, {"steps": [{"run": PROVE_SEMANTIC, key: "x"}]})
+    assert _masking_keys({}, {"steps": [{"run": PROVE_SEMANTIC, "shell": "bash -c :"}]})
+
+
 def test_ci_gates_the_paraphrase_eval_under_the_semantic_backend() -> None:
-    """Without a job installing the extra and selecting the semantic-marked
-    tests, the paraphrase floor is deselected everywhere and can never fail."""
-    jobs = _ci()["jobs"]
-    semantic_jobs = [
-        job
-        for job in jobs.values()
-        if "semantic]" in _runs(job) or "semantic]" in str(job)
-    ]
+    """Without a job installing the extra and running the semantic-marked tests,
+    the paraphrase floor is deselected everywhere and can never fail."""
+    workflow = _ci()
+    jobs = workflow["jobs"]
+    semantic_jobs = [job for job in jobs.values() if "semantic]" in str(job)]
     assert semantic_jobs, "no CI job installs the 'semantic' extra"
-    assert any("-m semantic" in _runs(job) for job in semantic_jobs), (
-        "the semantic extra is installed but the semantic-marked gates never run"
-    )
     for job in semantic_jobs:
-        # Exit status is not evidence — a shell can be told to lie in more ways
-        # than a gate can enumerate. The job must emit a report and verify it,
-        # so success requires the gates to appear in it as having passed.
-        runs = _runs(job)
-        assert "--junitxml=semantic-report.xml" in runs, (
-            "the semantic job leaves no record of what it ran"
-        )
-        assert "scripts/check_semantic_report.py semantic-report.xml" in runs, (
-            "nothing checks that the semantic gates appear in the report"
-        )
-        # The report closes the open-ended space of shell tricks. These are the
-        # closed set of workflow keys that can mask a step's status instead.
-        for scope in (job, *job["steps"]):
-            for key in ("if", "continue-on-error", "shell"):
-                assert key not in scope, f"the semantic gate carries {key!r}"
-    assert "defaults" not in _ci(), "workflow defaults can redefine every shell"
+        runs = [step.get("run", "").strip() for step in job["steps"]]
+        assert PROVE_SEMANTIC in runs, runs
+        assert _masking_keys(workflow, job) == [], _masking_keys(workflow, job)
     assert (ROOT / "scripts" / "check_semantic_report.py").exists()
     assert "semantic" in jobs["docker"].get("needs", []), (
         "the image publish does not wait for the semantic gate"
@@ -89,6 +111,12 @@ def test_ci_gates_the_paraphrase_eval_under_the_semantic_backend() -> None:
 
 def _report(cases: str) -> str:
     return f"<testsuites><testsuite>{cases}</testsuite></testsuites>"
+
+
+def _case(name: str, outcome: str = "") -> str:
+    module, bare = name.split("::")
+    body = f"<{outcome}/>" if outcome else ""
+    return f'<testcase classname="{module}" name="{bare}">{body}</testcase>'
 
 
 def test_the_report_check_covers_every_semantic_gate_in_the_suite() -> None:
@@ -104,7 +132,7 @@ def test_the_report_check_covers_every_semantic_gate_in_the_suite() -> None:
     )
     assert collected.returncode == 0, collected.stdout[-400:]
     marked = {
-        line.split("::")[-1].strip()
+        line.strip().replace("/", ".").replace(".py::", "::")
         for line in collected.stdout.splitlines()
         if "::" in line
     }
@@ -117,19 +145,105 @@ def test_a_report_missing_a_gate_is_not_evidence_that_it_ran() -> None:
     that cannot account for one of the tests the job claims to have run."""
     from scripts.check_semantic_report import verify
 
-    required = {"test_alpha", "test_beta"}
-    passed = _report('<testcase name="test_alpha"/><testcase name="test_beta"/>')
-    assert verify(passed, required) == []
+    required = {"tests.test_a::test_alpha", "tests.test_b::test_beta"}
+    both = _case("tests.test_a::test_alpha") + _case("tests.test_b::test_beta")
+    assert verify(_report(both), required) == []
     assert verify(_report(""), required) == [
-        "test_alpha: never ran",
-        "test_beta: never ran",
+        "tests.test_a::test_alpha: never ran",
+        "tests.test_b::test_beta: never ran",
     ]
-    assert verify(_report('<testcase name="test_alpha"/>'), required) == [
-        "test_beta: never ran"
+    assert verify(_report(_case("tests.test_a::test_alpha")), required) == [
+        "tests.test_b::test_beta: never ran"
     ]
     for outcome in ("failure", "error", "skipped"):
         report = _report(
-            f'<testcase name="test_alpha"><{outcome}/></testcase>'
-            '<testcase name="test_beta"/>'
+            _case("tests.test_a::test_alpha", outcome)
+            + _case("tests.test_b::test_beta")
         )
-        assert verify(report, required) == [f"test_alpha: {outcome}"]
+        assert verify(report, required) == [f"tests.test_a::test_alpha: {outcome}"]
+
+
+def test_a_failed_gate_is_not_masked_by_a_same_named_test_elsewhere() -> None:
+    """Two modules may each define a test of the same name. Keyed on the bare
+    name, whichever the report lists last stands in for the other."""
+    from scripts.check_semantic_report import verify
+
+    required = {"tests.test_a::test_shared"}
+    report = _report(
+        _case("tests.test_a::test_shared", "failure")
+        + _case("tests.test_b::test_shared")
+    )
+    assert verify(report, required) == ["tests.test_a::test_shared: failure"]
+
+
+def test_the_checker_runs_the_marked_gates_and_records_them() -> None:
+    """The command is the only part of the run the checker chooses; selecting
+    nothing, or recording nowhere, leaves it proving something else."""
+    from scripts.check_semantic_report import _pytest_command
+
+    report = pathlib.Path("somewhere") / "report.xml"
+    argv = _pytest_command(report)
+    assert argv[0] == sys.executable and argv[2] == "pytest", argv
+    options = argv[3:]
+    assert options[options.index("-m") + 1] == "semantic", argv
+    assert f"--junitxml={report}" in options, argv
+
+
+def test_the_checker_reads_only_a_report_the_run_it_started_wrote() -> None:
+    """A report the checker is handed can be committed, or written by a step
+    that ran no tests, and copied into place. One it opens a private path for
+    and then reads back cannot be."""
+    from scripts.check_semantic_report import check, required_tests
+
+    seen: Dict[str, Any] = {}
+
+    def runner(argv: List[str], cwd: str) -> int:
+        target = pathlib.Path(
+            next(arg for arg in argv if arg.startswith("--junitxml=")).split("=", 1)[1]
+        )
+        seen["path"] = target
+        seen["existed"] = target.exists()
+        seen["cwd"] = cwd
+        target.write_text(
+            _report("".join(_case(name) for name in required_tests())),
+            encoding="utf-8",
+        )
+        return 0
+
+    assert check(runner=runner) == []
+    assert seen["existed"] is False, (
+        "the run was pointed at a file that already existed"
+    )
+    assert ROOT not in seen["path"].parents, seen["path"]
+    assert pathlib.Path(seen["cwd"]) == ROOT, seen["cwd"]
+
+    # A run that writes nothing is the collection-only case: no report, no proof.
+    assert check(runner=lambda argv, cwd: 1) == [
+        "the run wrote no report (pytest exited 1)"
+    ]
+
+
+def test_an_empty_marker_set_is_not_a_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nothing required means every report satisfies it — a gate that certifies
+    an empty suite is the vacuous case this whole check exists to reject."""
+    from scripts import check_semantic_report as checker
+
+    monkeypatch.setattr(checker, "required_tests", set)
+    assert checker.check(runner=lambda argv, cwd: 0)
+
+
+def test_the_checker_fails_the_build_when_the_gates_are_not_proven(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A list of problems is a build failure only once something exits on it."""
+    from scripts import check_semantic_report as checker
+
+    monkeypatch.setattr(
+        checker, "check", lambda: ["tests.test_a::test_alpha: never ran"]
+    )
+    with pytest.raises(SystemExit) as failure:
+        checker.main()
+    assert failure.value.code, "an unproven gate did not fail the build"
+    assert "test_alpha" in str(failure.value.code)
+    monkeypatch.setattr(checker, "check", list)
+    checker.main()  # a proven run must not fail the build
