@@ -1,6 +1,10 @@
 """Run the semantic gates and prove every one of them passed.
 
-Run: python -m scripts.check_semantic_report
+What these gates measure with is a model cached under the home directory, which
+is outside the tree, outside the pinned dependency set, and outside every
+reading the run is started from. That is a stated boundary, not a closed one.
+
+Run: python -B -m scripts.check_semantic_report
 """
 
 from __future__ import annotations

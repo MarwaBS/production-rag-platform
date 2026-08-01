@@ -7,22 +7,23 @@ that ran nothing, and copied into place. So a check built on this starts the run
 itself, into a directory it creates outside the tree, and reads back only what
 that run wrote there.
 
-Which leaves what the run itself can do to that report. Anything loaded into
-the run is handed the path it writes and the status it exits on, so the routes
-that load code into a run for being present rather than for being named — a
-conftest, a startup module, a settings file carrying `-p`, a registered plugin —
-are all closed before it starts. What remains inside the run is the code the
-tests import, which is the thing under review.
+Which leaves what the run can do to that report, since it is handed the path it
+writes and the status it exits on. Naming the ways in closes one of them per
+attempt, so what is named here is the other side: the files the repo carries,
+the settings the run is given, and the variables it starts with. A run begins
+only from those, and what executes inside it is then the code the tests import,
+which is the thing under review.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import pathlib
 import subprocess
 import tempfile
 import tomllib
-from typing import Callable, Dict, List, Sequence, Set
+from typing import Callable, Dict, List, Set
 from xml.etree import ElementTree
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -34,8 +35,85 @@ _OUTCOMES = ("error", "failure", "skipped")
 
 CONFIG = REPO / "pyproject.toml"
 
-# Names that need no naming: import happens because the file is there.
-_IMPORTED_ON_SIGHT = ("conftest.py", "sitecustomize.py", "usercustomize.py")
+# Every file the repo carries. A run can execute anything that is here and
+# nothing that is not, so this is what a reviewer accepted rather than a list of
+# the names attacks have used so far.
+MANIFEST = frozenset(
+    {
+        ".github/workflows/ci.yml",
+        ".gitignore",
+        "LICENSE",
+        "README.md",
+        "app/__init__.py",
+        "app/chunking.py",
+        "app/config.py",
+        "app/embedder.py",
+        "app/main.py",
+        "chunking_derivation.json",
+        "constraints-dev.txt",
+        "deploy/Dockerfile",
+        "deploy/docker-compose.yml",
+        "deploy/helm/Chart.yaml",
+        "deploy/helm/templates/deployment.yaml",
+        "deploy/helm/templates/hpa.yaml",
+        "deploy/helm/templates/ingress.yaml",
+        "deploy/helm/templates/pdb.yaml",
+        "deploy/helm/templates/prometheusrule.yaml",
+        "deploy/helm/templates/secret.yaml",
+        "deploy/helm/templates/service.yaml",
+        "deploy/helm/templates/serviceaccount.yaml",
+        "deploy/helm/templates/servicemonitor.yaml",
+        "deploy/helm/values.yaml",
+        "docs/ci-cd-pipeline.yml",
+        "docs/decisions/001-faiss-over-managed-vector-db.md",
+        "docs/decisions/002-pre-grounding-over-post-filtering.md",
+        "docs/decisions/003-circuit-breaker-for-llm-resilience.md",
+        "docs/decisions/004-vendor-neutral-llm-protocol.md",
+        "eval_floors_derivation.json",
+        "evals/__init__.py",
+        "evals/__main__.py",
+        "evals/harness.py",
+        "pyproject.toml",
+        "scale_cliff_derivation.json",
+        "scripts/__init__.py",
+        "scripts/check_semantic_report.py",
+        "scripts/check_suite_report.py",
+        "scripts/derive_chunking.py",
+        "scripts/derive_eval_floors.py",
+        "scripts/derive_scale_cliff.py",
+        "scripts/gate_report.py",
+        "tests/test_app.py",
+        "tests/test_chunking.py",
+        "tests/test_ci_pipeline.py",
+        "tests/test_gate_report.py",
+        "tests/test_deploy_posture.py",
+        "tests/test_embedder.py",
+        "tests/test_eval.py",
+        "tests/test_generation_safety.py",
+        "tests/test_grounding_is_gated.py",
+        "tests/test_input_bounds.py",
+        "tests/test_observability.py",
+        "tests/test_posture.py",
+        "tests/test_retrieval_honesty.py",
+        "tests/test_scale.py",
+    }
+)
+
+# Git's own store and what the toolchain writes. These are skipped when listing
+# files; bytecode is refused outright below rather than skipped, because the
+# import system reads it in place of the source beside it.
+_BYTECODE = "__pycache__"
+_NOT_SOURCE = frozenset(
+    {
+        ".coverage",
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".venv",
+        _BYTECODE,
+    }
+)
 
 # Where pytest would take its settings from if the command named nowhere.
 _OTHER_SETTINGS = ("pytest.ini", ".pytest.ini", "tox.ini", "setup.cfg")
@@ -50,16 +128,34 @@ PYTEST_CONFIG = {
     ],
 }
 
-# Variables that add code or options to a run that did not ask for them.
-_UNSET = (
-    "PYTEST_ADDOPTS",
-    "PYTEST_PLUGINS",
-    "PYTHONNOUSERSITE",
-    "PYTHONUSERBASE",
-    "PYTHONPATH",
-    "PYTHONHOME",
-    "PYTHONSTARTUP",
+# Built, not filtered: a variable that survives is one somebody read. The first
+# six start an interpreter and its subprocesses; the rest resolve the home
+# directory the semantic job's cached model is found through.
+_INHERITED = (
+    "PATH",
+    "SYSTEMROOT",
+    "COMSPEC",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+    "HOME",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "APPDATA",
+    "LOCALAPPDATA",
 )
+_IMPOSED = {
+    # Entry points are how an installed distribution loads itself into a run.
+    "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+    # The user site directory is where a usercustomize module would come from.
+    "PYTHONNOUSERSITE": "1",
+    # Test names carry en dashes; the console default here cannot encode them.
+    "PYTHONIOENCODING": "utf-8",
+}
+
+# Modules the interpreter imports at startup, before it reads any command.
+_STARTUP_MODULES = ("sitecustomize", "usercustomize")
 
 
 def verify(report: str, required: Set[str]) -> List[str]:
@@ -87,16 +183,46 @@ def verify(report: str, required: Set[str]) -> List[str]:
     return problems
 
 
+def _git(*arguments: str) -> str:
+    return subprocess.run(
+        ["git", *arguments], capture_output=True, text=True, cwd=str(REPO)
+    ).stdout
+
+
+def tracked_files() -> Set[str]:
+    """Every path the repo carries, as git spells it."""
+    return {name for name in _git("ls-files", "-z").split("\0") if name}
+
+
 def tracked_test_files() -> List[pathlib.Path]:
-    """The test files git carries — what a reviewer of this repo is shown, and
-    the one listing both required sets are taken from."""
-    listing = subprocess.run(
-        ["git", "ls-files", "-z", "tests/test_*.py"],
-        capture_output=True,
-        text=True,
-        cwd=str(REPO),
+    """The test files git carries — the one listing both required sets are
+    taken from, so neither can be narrowed without the other noticing."""
+    return sorted(
+        REPO / name for name in tracked_files() if name.startswith("tests/test_")
     )
-    return [REPO / name for name in listing.stdout.split("\0") if name]
+
+
+def _directories_in_tree() -> List[str]:
+    """Every directory under the repo, including the ones the file listing
+    prunes — pruning is what let bytecode sit here unread."""
+    found = []
+    for directory, names, _ in os.walk(REPO):
+        names[:] = [name for name in names if name not in _NOT_SOURCE - {_BYTECODE}]
+        here = pathlib.Path(directory).relative_to(REPO)
+        found += [(here / name).as_posix() for name in names]
+    return sorted(found)
+
+
+def _files_in_tree() -> List[str]:
+    """Every file under the repo, spelled the way git spells one. The skipped
+    directories are pruned rather than filtered because the installed
+    environment alone holds tens of thousands of files."""
+    found = []
+    for directory, names, files in os.walk(REPO):
+        names[:] = [name for name in names if name not in _NOT_SOURCE]
+        here = pathlib.Path(directory).relative_to(REPO)
+        found += [(here / name).as_posix() for name in files if name not in _NOT_SOURCE]
+    return sorted(found)
 
 
 def keyed(path: pathlib.Path, name: str) -> str:
@@ -105,39 +231,65 @@ def keyed(path: pathlib.Path, name: str) -> str:
     return f"{module}::{name}"
 
 
-def environment() -> Dict[str, str]:
-    """The run's environment with every route that loads code the command did
-    not name closed: installed plugins register themselves through entry points,
-    and two variables add plugins and options to any run in the process."""
-    settings = dict(os.environ)
-    settings["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
-    for variable in _UNSET:
-        settings.pop(variable, None)
+def environment(cache: pathlib.Path) -> Dict[str, str]:
+    """The environment the run starts with, built rather than filtered.
+
+    The cache directory is the checker's own, so the run neither reads bytecode
+    left in the tree nor leaves any there for the next one to read."""
+    settings = {name: os.environ[name] for name in _INHERITED if name in os.environ}
+    settings.update(_IMPOSED)
+    settings["PYTHONPYCACHEPREFIX"] = str(cache)
     return settings
 
 
-def _in_tree(names: Sequence[str]) -> List[str]:
-    """Everything under the repo with one of these names, the environment the
-    tools were installed into aside."""
-    found = (path.relative_to(REPO) for path in REPO.rglob("*"))
-    return sorted(
-        str(path) for path in found if path.name in names and path.parts[0] != ".venv"
-    )
+def unaccepted_tree() -> List[str]:
+    """Whatever the run could execute that nobody has read.
 
-
-def auto_loaded() -> List[str]:
-    """Files in the tree that the run imports for being there and nothing else:
-    pytest reads a conftest from any directory on the way to a test, and the
-    interpreter imports the other two before it reads the command at all."""
-    return _in_tree(_IMPORTED_ON_SIGHT)
+    The tree is the commit and the commit is the manifest, so a file reaches a
+    run only by appearing in a diff — whatever it is called, and whether it is
+    imported at startup, collected, or loaded as a plugin."""
+    problems = [
+        f"{line.strip()}: in the tree and not in the commit"
+        for line in _git("status", "--porcelain").splitlines()
+        if line.strip()
+    ]
+    tracked = tracked_files()
+    problems += [
+        f"{name}: carried and not in the manifest"
+        for name in sorted(tracked - MANIFEST)
+    ]
+    problems += [
+        f"{name}: in the manifest and no longer carried"
+        for name in sorted(MANIFEST - tracked)
+    ]
+    problems += [
+        f"{name}: in the tree and not carried"
+        for name in _files_in_tree()
+        if name not in tracked
+    ]
+    problems += [
+        f"{name}: importable, and imported before any command is read"
+        for name in _STARTUP_MODULES
+        if importlib.util.find_spec(name) is not None
+    ]
+    # Bytecode whose header matches the source is loaded instead of it, and
+    # carries whatever it was compiled from. The run is pointed at a cache
+    # outside the tree; what is left here would still reach this process.
+    problems += [
+        f"{name}: bytecode read in place of the source beside it"
+        for name in _directories_in_tree()
+        if pathlib.PurePosixPath(name).name == _BYTECODE
+    ]
+    return problems
 
 
 def unapproved_settings() -> List[str]:
     """Anything deciding how the run behaves other than its own command and the
     one file that command names."""
     problems = [
-        f"{name}: a second place the run would take its settings from"
-        for name in _in_tree(_OTHER_SETTINGS)
+        f"{name}: a second place to take settings from"
+        for name in _files_in_tree()
+        if pathlib.PurePosixPath(name).name in _OTHER_SETTINGS
     ]
     settings = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
     if settings.get("tool", {}).get("pytest", {}).get("ini_options") != PYTEST_CONFIG:
@@ -149,18 +301,17 @@ def prove(required: Set[str], command: Command, runner: Runner) -> List[str]:
     """Run those tests and report whatever that run leaves unproven."""
     if not required:
         return ["no test is required: there is nothing to prove"]
-    # Read here rather than asked of the run: each of these is loaded into the
-    # run, is handed the path it reports to, and can write what it likes there.
-    refusals = [
-        f"{name}: loaded into the run that would be reporting" for name in auto_loaded()
-    ] + unapproved_settings()
+    # Read here and not asked of the run: each of these decides what the run
+    # loads, and what it loads is handed the report the run is judged by.
+    refusals = unaccepted_tree() + unapproved_settings()
     if refusals:
         return refusals
     with tempfile.TemporaryDirectory() as scratch:
         # A path opened by this process outside the tree: whatever the repo or an
         # earlier step may hold, it is not what gets read back here.
         report = pathlib.Path(scratch) / "report.xml"
-        status = runner(command(report), cwd=str(REPO), env=environment())
+        cache = pathlib.Path(scratch) / "bytecode"
+        status = runner(command(report), cwd=str(REPO), env=environment(cache))
         if not report.exists():
             return [f"the run wrote no report (pytest exited {status})"]
         problems = verify(report.read_text(encoding="utf-8"), required)

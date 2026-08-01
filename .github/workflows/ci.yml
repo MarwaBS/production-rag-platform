@@ -38,7 +38,7 @@ jobs:
         # This step IS the test run. A conftest that marks items skipped leaves
         # them collected and the run green, so the checker starts the run and
         # requires the report it wrote to account for every test in the source.
-        run: python -m scripts.check_suite_report
+        run: python -B -m scripts.check_suite_report
       - name: Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)
         run: python -m evals
 
@@ -61,7 +61,7 @@ jobs:
         # This step IS the test run. The checker starts it and reads the report
         # that run wrote, because neither an exit status nor a report handed to
         # a separate step can show which gates actually executed.
-        run: python -m scripts.check_semantic_report
+        run: python -B -m scripts.check_semantic_report
 
   iac:
     runs-on: ubuntu-latest

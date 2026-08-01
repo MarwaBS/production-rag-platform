@@ -6,7 +6,7 @@ whatever still executes; a deselect does the same more quietly. So the required
 set is read from the source of the tracked test files, and the report of the run
 has to account for every name in it.
 
-Run: python -m scripts.check_suite_report
+Run: python -B -m scripts.check_suite_report
 """
 
 from __future__ import annotations
