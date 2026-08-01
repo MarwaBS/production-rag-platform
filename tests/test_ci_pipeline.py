@@ -81,13 +81,65 @@ def test_the_tools_the_gates_run_are_configured_as_pinned() -> None:
 def test_no_file_in_the_tree_reconfigures_a_tool_a_gate_runs() -> None:
     """The pinned sections are only the config the tools would read if these
     were absent. Each of them either outranks a pinned section or replaces it,
-    and none is named on any command line, so none shows up in the workflow."""
+    and none is named on any command line, so none shows up in the workflow.
+    Ruff resolves per file up the directory chain, so which pyproject.toml this
+    is matters as much as the name: only the root one is the pinned one."""
     present = [
         str(path.relative_to(ROOT))
         for path in ROOT.rglob("*")
-        if path.name in TOOL_CONFIG_FILES and ".venv" not in path.parts
+        if path.name in TOOL_CONFIG_FILES
+        and ".venv" not in path.parts
+        and path != ROOT / "pyproject.toml"
     ]
     assert present == [], present
+
+
+# Every place a tracked file tells a gate to look away, and what it says there.
+# Each form is one tool's documented directive syntax, so the set of forms is
+# closed; the set of places is pinned, because adding one is how a live finding
+# leaves the report with the command, the config and the file list all correct.
+DIRECTIVES = (
+    re.compile(r"#\s*noqa(:\s*[A-Z0-9, ]+)?"),
+    re.compile(r"#\s*type:\s*ignore(\[[\w, -]+\])?"),
+    re.compile(r"#\s*(ruff|flake8|mypy)\s*:\s*[^\n]*"),
+    re.compile(r"#\s*pragma:\s*no cover"),
+)
+SUPPRESSIONS = {
+    "scripts/derive_chunking.py": ("noqa:E402",),
+    "scripts/derive_eval_floors.py": ("noqa:E402", "noqa:E402"),
+    "scripts/derive_scale_cliff.py": ("noqa:E402",),
+    "tests/test_app.py": ("noqa:F401",),
+    "tests/test_embedder.py": ("type:ignore[arg-type]",),
+    "tests/test_retrieval_honesty.py": ("noqa:E731",),
+}
+
+
+def _suppressions() -> Dict[str, Any]:
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z", "*.py"], capture_output=True, text=True, cwd=str(ROOT)
+    )
+    found = {}
+    for name in tracked.stdout.split("\0"):
+        if not name:
+            continue
+        text = (ROOT / name).read_text(encoding="utf-8")
+        told = tuple(
+            sorted(
+                "".join(match.group(0).lstrip("#").split())
+                for pattern in DIRECTIVES
+                for match in pattern.finditer(text)
+            )
+        )
+        if told:
+            found[name] = told
+    return found
+
+
+def test_the_places_a_gate_is_told_to_look_away_are_the_pinned_ones() -> None:
+    """A directive in the file beats every check on the command and the config:
+    one line at the top of a module and its whole file stops being judged, with
+    the linter still opening it and the type checker still counting it."""
+    assert _suppressions() == SUPPRESSIONS, _suppressions()
 
 
 def test_the_linter_opens_every_python_file_the_repo_tracks() -> None:
@@ -137,12 +189,11 @@ def test_the_type_checker_still_reports_an_error_under_the_config_it_resolves() 
 
 
 def test_nothing_reshapes_collection_from_a_conftest() -> None:
-    """A conftest can drop files from collection, and it can also let them be
-    collected and mark every test skipped, which the listing check below cannot
-    see. This repo has none. Note what this check cannot be: a conftest that
-    skips everything skips this too, so it catches the arrival of one only
-    while the suite is still running. What closes that class is a report of the
-    run read from outside it, the way the semantic gates are already proven."""
+    """A conftest can drop files from collection, mark every test skipped, and
+    write the report the run is judged by. This repo has none. What this check
+    is not is the thing that establishes that: a conftest doing any of it skips
+    this test too. It is an early word while the suite still runs; the checkers
+    read the same tree from outside and refuse to start a run at all."""
     found = [
         str(path.relative_to(ROOT))
         for path in ROOT.rglob("conftest.py")
@@ -458,6 +509,7 @@ ACTION_INPUTS = {
 # a ruff.toml replaces them outright, a mypy.ini silences every error. The set
 # is closed by each tool's documented discovery order, not by the one example.
 TOOL_CONFIG_FILES = (
+    "pyproject.toml",
     ".trivyignore",
     ".trivyignore.yaml",
     ".trivyignore.yml",
@@ -765,7 +817,7 @@ def test_the_checker_reads_only_a_report_the_run_it_started_wrote() -> None:
 
     seen: Dict[str, Any] = {}
 
-    def runner(argv: List[str], cwd: str) -> int:
+    def runner(argv: List[str], cwd: str, env: Dict[str, str]) -> int:
         target = _junitxml(argv)
         seen["path"] = target
         seen["existed"] = target.exists()
@@ -784,9 +836,75 @@ def test_the_checker_reads_only_a_report_the_run_it_started_wrote() -> None:
     assert pathlib.Path(seen["cwd"]) == ROOT, seen["cwd"]
 
     # A run that writes nothing is the collection-only case: no report, no proof.
-    assert check(runner=lambda argv, cwd: 1) == [
+    assert check(runner=lambda argv, cwd, env: 1) == [
         "the run wrote no report (pytest exited 1)"
     ]
+
+
+def test_the_run_is_started_with_nothing_loaded_its_command_did_not_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reading back only what the run wrote settles who handed the report over,
+    not what the run put in it. An installed plugin registers itself through an
+    entry point and is given the same path to write and the same status to exit
+    on; two variables add plugins and options to any run in the process."""
+    from scripts.check_semantic_report import check, required_tests
+    from scripts.gate_report import environment
+
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-p anything")
+    monkeypatch.setenv("PYTEST_PLUGINS", "anything")
+    settings = environment()
+    assert settings["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1", settings
+    assert "PYTEST_ADDOPTS" not in settings, sorted(settings)
+    assert "PYTEST_PLUGINS" not in settings, sorted(settings)
+
+    seen: Dict[str, Any] = {}
+
+    def runner(argv: List[str], cwd: str, env: Dict[str, str]) -> int:
+        seen["env"] = env
+        _junitxml(argv).write_text(
+            _report("".join(_case(name) for name in required_tests())), encoding="utf-8"
+        )
+        return 0
+
+    assert check(runner=runner) == []
+    assert seen["env"]["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1", "the run never got it"
+
+
+def test_a_conftest_is_refused_before_the_run_it_would_report_on_starts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The suite cannot police this one: a conftest that empties collection also
+    removes the test that bans conftests. Read from outside and before the run,
+    what it costs is the run never starting."""
+    from scripts import gate_report
+
+    started: List[Any] = []
+
+    def runner(argv: List[str], cwd: str, env: Dict[str, str]) -> int:
+        started.append(argv)
+        return 0
+
+    monkeypatch.setattr(gate_report, "conftest_files", lambda: ["conftest.py"])
+    problems = gate_report.prove(
+        {"tests.test_a::test_alpha"}, lambda report: ["pytest"], runner
+    )
+    assert problems == ["conftest.py: loaded into the run that would be reporting"]
+    assert started == [], "the run was started anyway"
+
+
+def test_the_conftest_reader_looks_past_the_root_of_the_tree(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """pytest loads one from any directory on the way to a test, so a reader
+    that only checked the root would be answering a different question."""
+    from scripts import gate_report
+
+    nested = tmp_path / "pkg" / "conftest.py"
+    nested.parent.mkdir()
+    nested.write_text("", encoding="utf-8")
+    monkeypatch.setattr(gate_report, "REPO", tmp_path)
+    assert gate_report.conftest_files() == [str(nested.relative_to(tmp_path))]
 
 
 def test_an_empty_marker_set_is_not_a_pass(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -795,7 +913,7 @@ def test_an_empty_marker_set_is_not_a_pass(monkeypatch: pytest.MonkeyPatch) -> N
     run has to write its report, or this passes on the missing file instead."""
     from scripts import check_semantic_report as checker
 
-    def runner(argv: List[str], cwd: str) -> int:
+    def runner(argv: List[str], cwd: str, env: Dict[str, str]) -> int:
         _junitxml(argv).write_text(_report(""), encoding="utf-8")
         return 0
 
@@ -862,7 +980,7 @@ def test_a_run_that_passed_every_test_and_still_exited_nonzero_is_not_proven() -
     the report passed and pytest exits one. The report alone calls that proven."""
     from scripts.check_suite_report import check, required_tests
 
-    def runner(argv: List[str], cwd: str) -> int:
+    def runner(argv: List[str], cwd: str, env: Dict[str, str]) -> int:
         _junitxml(argv).write_text(
             _report("".join(_case(name) for name in required_tests())), encoding="utf-8"
         )
@@ -883,3 +1001,5 @@ def test_the_suite_checker_runs_the_whole_suite_under_the_coverage_floor() -> No
     assert "--cov=app" in options and "--cov-fail-under=85" in options, argv
     assert f"--junitxml={report}" in options, argv
     assert "-m" not in options, argv
+    # Autoload is off for the run, so what it measures with has to be named.
+    assert options[options.index("-p") + 1] == "pytest_cov", argv

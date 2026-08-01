@@ -136,8 +136,9 @@ Full summaries in **[docs/decisions/](docs/decisions/)**:
 **This repository's own CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every pull request and every push to `main`:
 `ruff` lint + format check · `mypy` · `pip-audit` on the source tree's dependencies · `pytest` integration
 tests **under an 85% coverage floor**, started by [`scripts/check_suite_report.py`](scripts/check_suite_report.py) so
-the build fails unless every test the tracked files define appears in that run's report as having passed — a green
-run does not otherwise say which tests it ran · a **retrieval eval gate** ([`evals/`](evals/) — recall@k over a fixed
+the build fails unless every test the tracked files define — bar the semantic-marked ones, which the `semantic` job
+below proves the same way — appears in that run's report as having passed; a green run does not otherwise say which
+tests it ran · a **retrieval eval gate** ([`evals/`](evals/) — recall@k over a fixed
 Q/gold set driven through the service's own `/index` and `/query`, floored in [`tests/test_eval.py`](tests/test_eval.py)
 so a retrieval regression fails the build) · a separate **`semantic` job** that installs the optional
 sentence-transformers extra and runs the paraphrase floors, which the default word-matching embedder cannot

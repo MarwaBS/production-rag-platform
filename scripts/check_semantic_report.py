@@ -11,7 +11,7 @@ import subprocess
 import sys
 from typing import List, Set
 
-from scripts.gate_report import REPO, Runner, prove
+from scripts.gate_report import Runner, keyed, prove, tracked_test_files
 
 _MARKED = re.compile(r"@pytest\.mark\.semantic\s*\ndef (test_\w+)", re.MULTILINE)
 
@@ -19,8 +19,8 @@ _MARKED = re.compile(r"@pytest\.mark\.semantic\s*\ndef (test_\w+)", re.MULTILINE
 def required_tests() -> Set[str]:
     """Every semantic-marked test in the suite, keyed the way the report keys it."""
     return {
-        f"{path.relative_to(REPO).with_suffix('').as_posix().replace('/', '.')}::{name}"
-        for path in (REPO / "tests").glob("test_*.py")
+        keyed(path, name)
+        for path in tracked_test_files()
         for name in _MARKED.findall(path.read_text(encoding="utf-8"))
     }
 
