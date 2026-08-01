@@ -28,6 +28,18 @@ Runner = Callable[..., int]
 
 _OUTCOMES = ("error", "failure", "skipped")
 
+# Names that need no naming: import happens because the file is there.
+_IMPORTED_ON_SIGHT = ("conftest.py", "sitecustomize.py", "usercustomize.py")
+
+# Variables that add code or options to a run that did not ask for them.
+_UNSET = (
+    "PYTEST_ADDOPTS",
+    "PYTEST_PLUGINS",
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONSTARTUP",
+)
+
 
 def verify(report: str, required: Set[str]) -> List[str]:
     """Reasons the report fails to prove those tests passed; empty means proven.
@@ -78,17 +90,19 @@ def environment() -> Dict[str, str]:
     and two variables add plugins and options to any run in the process."""
     settings = dict(os.environ)
     settings["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
-    for variable in ("PYTEST_ADDOPTS", "PYTEST_PLUGINS"):
+    for variable in _UNSET:
         settings.pop(variable, None)
     return settings
 
 
-def conftest_files() -> List[str]:
-    """Conftest modules, which load into the run wherever they sit in the tree."""
+def auto_loaded() -> List[str]:
+    """Files in the tree that the run imports for being there and nothing else:
+    pytest reads a conftest from any directory on the way to a test, and the
+    interpreter imports these two before it reads the command at all."""
     return sorted(
         str(path.relative_to(REPO))
-        for path in REPO.rglob("conftest.py")
-        if ".venv" not in path.parts
+        for path in REPO.rglob("*")
+        if path.name in _IMPORTED_ON_SIGHT and ".venv" not in path.parts
     )
 
 
@@ -98,7 +112,7 @@ def prove(required: Set[str], command: Command, runner: Runner) -> List[str]:
         return ["no test is required: there is nothing to prove"]
     # Read here rather than asked of the run: a conftest is loaded into the run,
     # is handed the path it reports to, and can write whatever it likes there.
-    loaded = conftest_files()
+    loaded = auto_loaded()
     if loaded:
         return [
             f"{name}: loaded into the run that would be reporting" for name in loaded

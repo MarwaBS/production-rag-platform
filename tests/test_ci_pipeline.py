@@ -188,18 +188,16 @@ def test_the_type_checker_still_reports_an_error_under_the_config_it_resolves() 
     assert "return-value" in judged.stdout, judged.stdout[-400:]
 
 
-def test_nothing_reshapes_collection_from_a_conftest() -> None:
+def test_nothing_in_the_tree_loads_itself_into_a_run() -> None:
     """A conftest can drop files from collection, mark every test skipped, and
-    write the report the run is judged by. This repo has none. What this check
-    is not is the thing that establishes that: a conftest doing any of it skips
-    this test too. It is an early word while the suite still runs; the checkers
-    read the same tree from outside and refuse to start a run at all."""
-    found = [
-        str(path.relative_to(ROOT))
-        for path in ROOT.rglob("conftest.py")
-        if ".venv" not in path.parts
-    ]
-    assert found == [], found
+    write the report the run is judged by; a sitecustomize runs before pytest is
+    even reached. This repo has neither. What this check is not is the thing
+    that establishes that — either of them doing any of it skips this test too.
+    It is an early word while the suite still runs; the checkers read the same
+    tree from outside and refuse to start a run at all."""
+    from scripts.gate_report import auto_loaded
+
+    assert auto_loaded() == [], auto_loaded()
 
 
 def test_every_tracked_test_file_is_collected() -> None:
@@ -851,12 +849,12 @@ def test_the_run_is_started_with_nothing_loaded_its_command_did_not_name(
     from scripts.check_semantic_report import check, required_tests
     from scripts.gate_report import environment
 
-    monkeypatch.setenv("PYTEST_ADDOPTS", "-p anything")
-    monkeypatch.setenv("PYTEST_PLUGINS", "anything")
+    added = ("PYTEST_ADDOPTS", "PYTEST_PLUGINS", "PYTHONPATH", "PYTHONSTARTUP")
+    for variable in added:
+        monkeypatch.setenv(variable, "anything")
     settings = environment()
     assert settings["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1", settings
-    assert "PYTEST_ADDOPTS" not in settings, sorted(settings)
-    assert "PYTEST_PLUGINS" not in settings, sorted(settings)
+    assert not [name for name in added if name in settings], sorted(settings)
 
     seen: Dict[str, Any] = {}
 
@@ -885,7 +883,7 @@ def test_a_conftest_is_refused_before_the_run_it_would_report_on_starts(
         started.append(argv)
         return 0
 
-    monkeypatch.setattr(gate_report, "conftest_files", lambda: ["conftest.py"])
+    monkeypatch.setattr(gate_report, "auto_loaded", lambda: ["conftest.py"])
     problems = gate_report.prove(
         {"tests.test_a::test_alpha"}, lambda report: ["pytest"], runner
     )
@@ -893,18 +891,23 @@ def test_a_conftest_is_refused_before_the_run_it_would_report_on_starts(
     assert started == [], "the run was started anyway"
 
 
-def test_the_conftest_reader_looks_past_the_root_of_the_tree(
+def test_the_reader_of_what_loads_itself_looks_past_the_root_of_the_tree(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """pytest loads one from any directory on the way to a test, so a reader
-    that only checked the root would be answering a different question."""
+    """pytest reads a conftest from any directory on the way to a test, and the
+    interpreter imports a sitecustomize from anywhere the path reaches — which
+    the editable install makes include this root. A reader that only looked at
+    the root, or only for one of the names, answers a different question."""
     from scripts import gate_report
 
-    nested = tmp_path / "pkg" / "conftest.py"
-    nested.parent.mkdir()
-    nested.write_text("", encoding="utf-8")
+    planted = [tmp_path / "pkg" / "conftest.py", tmp_path / "sitecustomize.py"]
+    planted[0].parent.mkdir()
+    for path in planted:
+        path.write_text("", encoding="utf-8")
     monkeypatch.setattr(gate_report, "REPO", tmp_path)
-    assert gate_report.conftest_files() == [str(nested.relative_to(tmp_path))]
+    assert gate_report.auto_loaded() == sorted(
+        str(path.relative_to(tmp_path)) for path in planted
+    )
 
 
 def test_an_empty_marker_set_is_not_a_pass(monkeypatch: pytest.MonkeyPatch) -> None:
