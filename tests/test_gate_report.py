@@ -241,6 +241,32 @@ markers = {pinned["markers"]!r}
     ]
 
 
+def test_a_file_whose_content_left_the_index_stops_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`status` trusts a stat cache, so an edit of equal size with the recorded
+    time put back leaves it silent. What the index records is a hash, and the
+    file on disk either hashes to it or does not."""
+    from scripts import gate_report
+
+    answers = {
+        ("ls-files", "-s"): "100644 aaaa 0\tapp/main.py\n100644 bbbb 0\tapp/config.py"
+    }
+    monkeypatch.setattr(
+        gate_report,
+        "_git",
+        lambda *arguments, **_: (
+            # Hashed in sorted order: config.py, whose digest the index does
+            # not record, then main.py, whose digest it does.
+            "cccc aaaa" if arguments[0] == "hash-object" else answers.get(arguments, "")
+        ),
+    )
+    monkeypatch.setattr(gate_report, "MANIFEST", frozenset())
+    problems = gate_report.unaccepted_tree()
+    assert "app/config.py: its content is not what the index records" in problems
+    assert "app/main.py: its content is not what the index records" not in problems
+
+
 def test_a_file_the_index_stopped_looking_at_stops_the_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -251,9 +277,9 @@ def test_a_file_the_index_stopped_looking_at_stops_the_run(
     from scripts import gate_report
 
     flagged = ["h app/chunking.py", "H app/main.py"]
-    listing = {"status": "", "ls-files": "\n".join(flagged)}
+    answers = {("ls-files", "-v"): "\n".join(flagged)}
     monkeypatch.setattr(
-        gate_report, "_git", lambda *arguments: listing.get(arguments[0], "")
+        gate_report, "_git", lambda *arguments, **_: answers.get(arguments, "")
     )
     monkeypatch.setattr(gate_report, "MANIFEST", frozenset())
     problems = gate_report.unaccepted_tree()
@@ -313,12 +339,16 @@ def test_a_file_the_repo_was_told_to_ignore_is_still_in_the_tree(
 
     (tmp_path / "pkg").mkdir()
     (tmp_path / "pkg" / "ignored.key").write_text("", encoding="utf-8")
+    # A cache name below the root is a directory that only looks like a cache,
+    # so the names are pruned where caches live and not wherever they appear.
+    (tmp_path / "pkg" / ".ruff_cache").mkdir()
+    (tmp_path / "pkg" / ".ruff_cache" / "probe").write_text("", encoding="utf-8")
     monkeypatch.setattr(gate_report, "REPO", tmp_path)
     monkeypatch.setattr(gate_report, "tracked_files", set)
     monkeypatch.setattr(gate_report, "MANIFEST", frozenset())
-    assert "pkg/ignored.key: in the tree and not carried" in (
-        gate_report.unaccepted_tree()
-    )
+    problems = gate_report.unaccepted_tree()
+    assert "pkg/ignored.key: in the tree and not carried" in problems
+    assert "pkg/.ruff_cache/probe: in the tree and not carried" in problems
 
 
 def test_bytecode_left_in_the_tree_stops_the_run(

@@ -34,7 +34,7 @@ jobs:
         run: |
           pip install pip-audit -c constraints-dev.txt
           pip-audit
-      - name: Integration tests (every tracked test proven to have run; coverage floor enforced)
+      - name: Integration tests (the run has to account for every test it selects; coverage floor enforced)
         # This step IS the test run. A conftest that marks items skipped leaves
         # them collected and the run green, so the checker starts the run and
         # requires the report it wrote to account for every test in the source.

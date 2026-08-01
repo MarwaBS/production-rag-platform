@@ -4,9 +4,9 @@ Measures recall@3 of the literal query set through the service's own /index and
 /query as the corpus grows, on the default hash backend. The same sizes are
 measured twice by one construction over two word pools of equal size, so the
 word count and the index arithmetic are identical and only the words being
-reused change. Two things do not match and both cut against the control: its
-words are longer, and its pool is itself vocabulary the corpus lacks, so it
-carries that many more distinct tokens into the buckets rather than fewer.
+reused change. One thing does not match, and it cuts against the control: its
+pool is itself vocabulary the corpus lacks, so it carries that many more
+distinct tokens into the buckets rather than fewer.
 
 Run: python scripts/derive_scale_cliff.py            # rewrite the committed file
      python scripts/derive_scale_cliff.py --print    # print, no write (CI gate)

@@ -111,9 +111,25 @@ DIRECTIVES = tuple(
         r"#\s*(ruff|flake8|mypy)\s*:\s*[^\n]*",
         r"#\s*fmt:\s*(off|on|skip)",
         r"#\s*pragma[:\s]\s*no\s*\w+",
-        r"@\s*(typing\.)?no_type_check(_decorator)?",
     )
 )
+
+# Every decorator the repo uses. A waiver can be spelled as any name that
+# resolves to one — an alias, an attribute of an aliased module — which a
+# reader over text cannot follow, so what is read is the set of names itself.
+DECORATORS = frozenset(
+    {
+        "@app.get",
+        "@app.post",
+        "@asynccontextmanager",
+        "@dataclass",
+        "@model_validator",
+        "@pytest.fixture",
+        "@pytest.mark.parametrize",
+        "@pytest.mark.semantic",
+    }
+)
+_DECORATOR = re.compile(r"^\s*(@[A-Za-z_][A-Za-z0-9_.]*)", re.MULTILINE)
 SUPPRESSIONS = {
     "scripts/derive_chunking.py": ("noqa:E402",),
     "scripts/derive_eval_floors.py": ("noqa:E402", "noqa:E402"),
@@ -124,14 +140,19 @@ SUPPRESSIONS = {
 }
 
 
-def _suppressions() -> Dict[str, Any]:
-    tracked = subprocess.run(
-        ["git", "ls-files", "-z", "*.py"], capture_output=True, text=True, cwd=str(ROOT)
+def _tracked(pattern: str) -> List[str]:
+    listing = subprocess.run(
+        ["git", "ls-files", "-z", pattern],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
     )
+    return [name for name in listing.stdout.split("\0") if name]
+
+
+def _suppressions() -> Dict[str, Any]:
     found = {}
-    for name in tracked.stdout.split("\0"):
-        if not name:
-            continue
+    for name in _tracked("*.py"):
         text = (ROOT / name).read_text(encoding="utf-8")
         told = tuple(
             sorted(
@@ -154,9 +175,18 @@ def test_every_spelling_a_gate_accepts_is_one_this_reader_matches() -> None:
     waived = ("NOQA", "noqa: F401", "pragma no cover", "PRAGMA: NO COVER")
     for text in waived:
         assert any(pattern.search(f"# {text}") for pattern in DIRECTIVES), text
-    # The type checker's decorator waives a whole function with no comment in it.
-    for text in ("no_type_check", "typing.no_type_check"):
-        assert any(pattern.search(f"@{text}") for pattern in DIRECTIVES), text
+
+
+def test_every_decorator_in_the_tree_is_one_that_has_been_read() -> None:
+    """A decorator waives what a comment does and leaves no comment behind, and
+    the name it is spelled with need not be the name it resolves to. Reading
+    the names that are here beats matching the spellings a reader thought of."""
+    found = {
+        match
+        for name in _tracked("*.py")
+        for match in _DECORATOR.findall((ROOT / name).read_text(encoding="utf-8"))
+    }
+    assert found == DECORATORS, sorted(found ^ DECORATORS)
 
 
 def test_the_places_a_gate_is_told_to_look_away_are_the_pinned_ones() -> None:
@@ -295,12 +325,11 @@ PUBLISH_STEP_KEYS = STEP_KEYS | {"if", "id"}
 def _unvetted_keys(workflow: Dict[Any, Any], job: Dict[str, Any]) -> List[str]:
     """Keys in this job that nobody has read and accepted.
 
-    Listing the keys that can neuter a step is a blacklist over a set that keeps
-    producing new members — shell, then defaults, then continue-on-error, then
-    working-directory, then a step-level env that rebinds the image being
-    scanned. The keys GitHub defines are a closed set, so the sound direction is
-    the other one: allow what is used here and refuse the rest, which forces the
-    next key to be read before it is adopted.
+    Listing the keys that can neuter a step is a blacklist over a set with no
+    edge: a shell, a default, a condition, a working directory and a step-level
+    env each do it differently. The keys GitHub defines are a closed set, so the
+    sound direction is the other one: allow what is used here and refuse the
+    rest, which forces the next key to be read before it is adopted.
     """
     problems = [f"workflow: {key}" for key in workflow if key not in WORKFLOW_KEYS]
     problems += [f"job: {key}" for key in job if key not in JOB_KEYS]
@@ -429,7 +458,7 @@ PIPELINE_STEPS = {
             ("pip install pip-audit -c constraints-dev.txt", "pip-audit"),
         ),
         (
-            "Integration tests (every tracked test proven to have run; coverage floor enforced)",
+            "Integration tests (the run has to account for every test it selects; coverage floor enforced)",
             None,
             (PROVE_SUITE,),
         ),
@@ -504,7 +533,7 @@ ADVERTISED_STEPS = (
     "Format check",
     "Type-check",
     "Audit Python dependencies (pip-audit)",
-    "Integration tests (every tracked test proven to have run; coverage floor enforced)",
+    "Integration tests (the run has to account for every test it selects; coverage floor enforced)",
     "Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)",
     "Paraphrase floor + floor-derivation reproduce (semantic-marked gates)",
     "Helm lint + render",
@@ -587,10 +616,10 @@ def _advertised(step: Dict[str, Any]) -> bool:
 def _gate_steps(workflow: Dict[Any, Any]) -> List[Dict[str, Any]]:
     """Steps whose outcome decides a verdict.
 
-    Excluding the publish by a `with.push` key let any step opt out of being a
-    gate by setting it, and YAML reads `push: "false"` as a truthy string. What
-    identifies the publish is that it publishes: it carries the merge
-    condition, which nothing that decides a verdict may do."""
+    What identifies the publish is that it publishes: it carries the merge
+    condition, which nothing that decides a verdict may do. Identifying it by a
+    `with.push` key would let any step opt out by setting one, and YAML reads
+    `push: "false"` as a truthy string."""
     return [s for s in _steps(workflow) if not s.get("if") and _advertised(s)]
 
 

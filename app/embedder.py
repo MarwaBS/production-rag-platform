@@ -1,8 +1,8 @@
 """Text embedding behind one function, backend selected by APP_EMBEDDING_BACKEND.
 
 The default hash embedder matches words, not meaning: it retrieves few of the
-paraphrases that share no token with their document, and its 128 buckets alias
-as vocabulary grows. Both are measured, in eval_floors_derivation.json and
+paraphrases that share no token with their document, and retrieval falls as the
+corpus grows. Both are measured, in eval_floors_derivation.json and
 scale_cliff_derivation.json; the paraphrase floors assume the semantic extra.
 """
 
@@ -16,9 +16,9 @@ import numpy as np
 
 from .config import get_settings
 
-# Chosen, not derived: a hash embedder trades collisions against vector width,
-# and nothing in this corpus fixes the number. What it costs is measured —
-# 128 buckets alias as vocabulary grows, in scale_cliff_derivation.json.
+# Chosen, not derived: a hash embedder trades collisions against vector width
+# and nothing here fixes the number. What that choice costs is NOT measured in
+# this repo — the recorded curve holds the width constant across both arms.
 _DIM = 128
 _settings = get_settings()
 _semantic_model: Any = None

@@ -8,11 +8,10 @@ itself, into a directory it creates outside the tree, and reads back only what
 that run wrote there.
 
 Which leaves what the run can do to that report, since it is handed the path it
-writes and the status it exits on. Naming the ways in closes one of them per
-attempt, so what is named here is the other side: the files the repo carries,
-the settings the run is given, and the variables it starts with. A run begins
-only from those, and what executes inside it is then the code the tests import,
-which is the thing under review.
+writes and the status it exits on. So what is named here is not the ways in but
+the other side: the files the repo carries, the settings the run is given, and
+the variables it starts with. A run begins only from those, and what executes
+inside it is then the code the tests import, which is the thing under review.
 """
 
 from __future__ import annotations
@@ -98,9 +97,9 @@ MANIFEST = frozenset(
     }
 )
 
-# Git's own store and what the toolchain writes. These are skipped when listing
-# files; bytecode is refused outright below rather than skipped, because the
-# import system reads it in place of the source beside it.
+# Git's own store and what the toolchain writes AT THE ROOT, which is where
+# they live. Pruning the names at any depth hides a directory that only looks
+# like one of them; bytecode is refused outright rather than skipped anywhere.
 _BYTECODE = "__pycache__"
 _NOT_SOURCE = frozenset(
     {
@@ -182,10 +181,30 @@ def verify(report: str, required: Set[str]) -> List[str]:
     return problems
 
 
-def _git(*arguments: str) -> str:
+def _git(*arguments: str, stdin: str = "") -> str:
     return subprocess.run(
-        ["git", *arguments], capture_output=True, text=True, cwd=str(REPO)
+        ["git", *arguments],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        cwd=str(REPO),
     ).stdout
+
+
+def _changed_since_the_index() -> List[str]:
+    """Tracked files whose content differs from what the index records.
+
+    Compared by hash and not by `status`, which trusts a stat cache: an edit of
+    equal size with the recorded time put back leaves it silent."""
+    recorded = {}
+    for line in _git("ls-files", "-s").splitlines():
+        details, _, name = line.partition("\t")
+        recorded[name] = details.split()[1]
+    names = sorted(recorded)
+    if not names:
+        return []
+    hashed = _git("hash-object", "--stdin-paths", stdin="\n".join(names)).split()
+    return [name for name, digest in zip(names, hashed) if digest != recorded[name]]
 
 
 def tracked_files() -> Set[str]:
@@ -210,7 +229,12 @@ def _walk_tree() -> Tuple[List[str], List[str]]:
     for directory, names, found in os.walk(REPO):
         here = pathlib.Path(directory).relative_to(REPO)
         bytecode += [(here / name).as_posix() for name in names if name == _BYTECODE]
-        names[:] = [name for name in names if name not in _NOT_SOURCE]
+        root = here == pathlib.Path(".")
+        names[:] = [
+            name
+            for name in names
+            if name != _BYTECODE and not (root and name in _NOT_SOURCE)
+        ]
         files += [(here / name).as_posix() for name in found if name not in _NOT_SOURCE]
     return sorted(files), sorted(bytecode)
 
@@ -249,6 +273,10 @@ def unaccepted_tree() -> List[str]:
         f"{line[2:]}: the index was told to stop looking at it"
         for line in _git("ls-files", "-v").splitlines()
         if line and line[0] != "H"
+    ]
+    problems += [
+        f"{name}: its content is not what the index records"
+        for name in _changed_since_the_index()
     ]
     tracked = tracked_files()
     problems += [
