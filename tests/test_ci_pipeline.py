@@ -13,6 +13,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 from typing import Any, Dict, List
 
 import pytest
@@ -51,6 +52,11 @@ TOOL_CONFIG = {
             ],
         }
     },
+    "mypy": {
+        "python_version": "3.12",
+        "warn_unused_configs": True,
+        "overrides": [{"module": ["rag_llm_infra.*"], "ignore_missing_imports": True}],
+    },
     "ruff": {
         "target-version": "py312",
         "lint": {
@@ -70,6 +76,64 @@ def test_the_tools_the_gates_run_are_configured_as_pinned() -> None:
     for name, expected in TOOL_CONFIG.items():
         assert tools.get(name) == expected, (name, tools.get(name))
     assert "coverage" not in tools, tools.get("coverage")
+
+
+def test_no_file_in_the_tree_reconfigures_a_tool_a_gate_runs() -> None:
+    """The pinned sections are only the config the tools would read if these
+    were absent. Each of them either outranks a pinned section or replaces it,
+    and none is named on any command line, so none shows up in the workflow."""
+    present = [
+        str(path.relative_to(ROOT))
+        for path in ROOT.rglob("*")
+        if path.name in TOOL_CONFIG_FILES and ".venv" not in path.parts
+    ]
+    assert present == [], present
+
+
+def test_the_linter_opens_every_python_file_the_repo_tracks() -> None:
+    """Pinning a config section proves what it says, not what the run does with
+    it: an exclusion reaching ruff from anywhere at all leaves `ruff check .`
+    reporting success over files it no longer opens. Ask it which files it
+    would open, and require every tracked one to be among them."""
+    listed = subprocess.run(
+        [sys.executable, "-m", "ruff", "check", ".", "--show-files"],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
+    )
+    assert listed.returncode == 0, listed.stderr[-400:]
+    examined = {
+        pathlib.Path(line.strip()).resolve()
+        for line in listed.stdout.splitlines()
+        if line.strip()
+    }
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z", "*.py"], capture_output=True, text=True, cwd=str(ROOT)
+    )
+    expected = {(ROOT / name).resolve() for name in tracked.stdout.split("\0") if name}
+    assert expected, "fixture: git listed no tracked python files"
+    assert expected <= examined, sorted(str(path) for path in expected - examined)
+
+
+def test_the_type_checker_still_reports_an_error_under_the_config_it_resolves() -> None:
+    """The same for mypy, which has no list of files to ask for. A config that
+    silences every error leaves the pinned command exiting zero over code it has
+    stopped judging, and mypy resolves that config from the directory it runs
+    in, where a file outranks the pinned section. So give it one that must
+    fail."""
+    with tempfile.TemporaryDirectory() as scratch:
+        probe = pathlib.Path(scratch) / "probe.py"
+        probe.write_text(
+            "def probe() -> int:\n    return 'not an int'\n", encoding="utf-8"
+        )
+        judged = subprocess.run(
+            [sys.executable, "-m", "mypy", str(probe)],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+        )
+    assert judged.returncode != 0, judged.stdout[-400:]
+    assert "return-value" in judged.stdout, judged.stdout[-400:]
 
 
 def test_nothing_reshapes_collection_from_a_conftest() -> None:
@@ -389,13 +453,27 @@ ACTION_INPUTS = {
     "docker/login-action": {"registry", "username", "password"},
     "docker/build-push-action": {"context", "file", "load", "push", "tags"},
 }
-# Config files these tools read from the repo root without being told to. An
-# ignore file excuses findings with the workflow untouched.
-TOOL_IGNORE_FILES = (
+# What each tool the pipeline runs loads on its own, without a flag naming it.
+# Every one of these outranks or bypasses the pyproject sections pinned above:
+# a ruff.toml replaces them outright, a mypy.ini silences every error. The set
+# is closed by each tool's documented discovery order, not by the one example.
+TOOL_CONFIG_FILES = (
     ".trivyignore",
     ".trivyignore.yaml",
+    ".trivyignore.yml",
+    "trivy.yaml",
+    "trivy.yml",
     ".hadolint.yaml",
     ".hadolint.yml",
+    "ruff.toml",
+    ".ruff.toml",
+    "mypy.ini",
+    ".mypy.ini",
+    "pytest.ini",
+    ".pytest.ini",
+    "tox.ini",
+    "setup.cfg",
+    ".coveragerc",
 )
 VETTED_INPUTS = {
     "aquasecurity/trivy-action": {
@@ -499,8 +577,6 @@ def test_every_action_the_readme_advertises_is_present_and_can_fail() -> None:
         allowed = ACTION_INPUTS.get(action)
         assert allowed is not None, f"{action} has no vetted input list"
         assert set(step.get("with") or {}) <= allowed, (action, step.get("with"))
-    for ignore_file in TOOL_IGNORE_FILES:
-        assert not (ROOT / ignore_file).exists(), ignore_file
     for name, vetted in VETTED_INPUTS.items():
         steps = _action(workflow, name)
         # Exactly one: a second, later step of the same action overwrites what
