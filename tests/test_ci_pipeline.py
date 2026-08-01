@@ -37,6 +37,34 @@ def _runs(job: Dict[str, Any]) -> str:
     return "\n".join(step.get("run", "") for step in job.get("steps", []))
 
 
+def test_every_tracked_test_file_is_collected() -> None:
+    """The suite that runs has to be the suite that exists. A conftest naming
+    files in collect_ignore drops them with nothing else changing: the run is
+    green, the coverage floor is still met on what remains, and the tests are
+    simply not there. Only one gate happened to notice, and by side effect."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z", "tests/test_*.py"],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
+    )
+    expected = {path for path in tracked.stdout.split(chr(0)) if path}
+    assert expected, "fixture: git listed no tracked test files"
+    collected = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q"],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
+    )
+    assert collected.returncode == 0, collected.stdout[-400:]
+    seen = {
+        line.split("::")[0].replace(chr(92), "/")
+        for line in collected.stdout.splitlines()
+        if "::" in line
+    }
+    assert expected <= seen, sorted(expected - seen)
+
+
 def _top_level(listing: str) -> set[str]:
     """What each tracked path must be reachable as on a type-check command line:
     its package for a file in one, the file itself for one at the root."""
