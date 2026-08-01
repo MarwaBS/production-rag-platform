@@ -101,7 +101,8 @@ def test_no_file_in_the_tree_reconfigures_a_tool_a_gate_runs() -> None:
 
 # Every place a tracked file tells a gate to look away, one form per gate that
 # reads one. Adding a place is how a live finding leaves the report with the
-# command and the config both still correct, so the places are pinned.
+# command and the config both still correct, so the places are pinned. Not all
+# of them are comments: the type checker takes a decorator too.
 DIRECTIVES = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
@@ -110,6 +111,7 @@ DIRECTIVES = tuple(
         r"#\s*(ruff|flake8|mypy)\s*:\s*[^\n]*",
         r"#\s*fmt:\s*(off|on|skip)",
         r"#\s*pragma[:\s]\s*no\s*\w+",
+        r"@\s*(typing\.)?no_type_check(_decorator)?",
     )
 )
 SUPPRESSIONS = {
@@ -152,6 +154,9 @@ def test_every_spelling_a_gate_accepts_is_one_this_reader_matches() -> None:
     waived = ("NOQA", "noqa: F401", "pragma no cover", "PRAGMA: NO COVER")
     for text in waived:
         assert any(pattern.search(f"# {text}") for pattern in DIRECTIVES), text
+    # The type checker's decorator waives a whole function with no comment in it.
+    for text in ("no_type_check", "typing.no_type_check"):
+        assert any(pattern.search(f"@{text}") for pattern in DIRECTIVES), text
 
 
 def test_the_places_a_gate_is_told_to_look_away_are_the_pinned_ones() -> None:
@@ -221,10 +226,9 @@ def test_no_stub_stands_in_for_a_module_the_type_checker_would_judge() -> None:
 
 
 def test_every_tracked_test_file_is_collected() -> None:
-    """The suite that runs has to be the suite that exists. A conftest naming
-    files in collect_ignore drops them with nothing else changing: the run is
-    green, the coverage floor is still met on what remains, and the tests are
-    simply not there. Only one gate happened to notice, and by side effect."""
+    """The suite that runs has to be the suite that exists. A conftest
+    naming files in collect_ignore drops them with nothing else changing: the
+    run is green and the coverage floor is still met on what remains."""
     tracked = subprocess.run(
         ["git", "ls-files", "-z", "tests/test_*.py"],
         capture_output=True,
@@ -263,10 +267,8 @@ def test_the_type_check_argument_reader_does_not_overlook_a_root_level_file() ->
 
 
 def test_ci_type_checks_every_directory_that_ships_python() -> None:
-    """The gate that fails the build on an unproven semantic run now lives in
-    scripts/, which the type-check argument list did not name. Naming the
-    directories that exist beats naming the three that existed when it was
-    written."""
+    """Naming the directories that ship python beats naming the ones that
+    happened to exist when the command line was written."""
     everything = "\n".join(_runs(job) for job in _ci()["jobs"].values())
     invocation = [
         line.strip()
@@ -379,8 +381,8 @@ def test_ci_gates_the_paraphrase_eval_under_the_semantic_backend() -> None:
 
 
 def test_no_job_carries_a_key_nobody_has_read() -> None:
-    """Every job, not the ones some other job waits on: scoping this by `needs`
-    left the publish job — the one holding the image scan — unexamined."""
+    """Every job, not the ones some other job waits on: the publish job holds
+    the image scan and nothing waits on it."""
     workflow = _ci()
     for name, job in workflow["jobs"].items():
         assert _unvetted_keys(workflow, job) == [], (

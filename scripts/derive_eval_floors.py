@@ -43,7 +43,7 @@ def derive() -> dict:
     # semantic extra.
     embedder._settings.embedding_backend = "hash"
     try:
-        hash_measown = {
+        hash_measured = {
             "literal": _measure(QUERIES),
             "paraphrase": _measure(paraphrased),
         }
@@ -53,7 +53,7 @@ def derive() -> dict:
     baseline = semantic["paraphrase"]
     # The default path is gated too, and against its own measurement: floors
     # derived from the semantic instrument are far below what it actually does.
-    default_baseline = hash_measown["literal"]
+    default_baseline = hash_measured["literal"]
     default_n = len(QUERIES)
     return {
         "baseline": "semantic backend on the zero-overlap paraphrase set",
@@ -64,8 +64,8 @@ def derive() -> dict:
         "measured": {
             "semantic_paraphrase": baseline,
             "semantic_literal": semantic["literal"],
-            "hash_paraphrase": hash_measown["paraphrase"],
-            "hash_literal": hash_measown["literal"],
+            "hash_paraphrase": hash_measured["paraphrase"],
+            "hash_literal": hash_measured["literal"],
         },
         "derived_floors": {
             metric: round(value - 0.5 / n, 4) for metric, value in baseline.items()

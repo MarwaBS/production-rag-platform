@@ -224,6 +224,42 @@ markers = {pinned["markers"]!r}
         "pkg/tox.ini: a second place to take settings from"
     ]
 
+    # The direction that carries the weight: present, and saying something else.
+    # A settings file the run is given is refused for what it says, not for
+    # existing, or the one option that loads a plugin would go through unread.
+    (tmp_path / "pkg" / "tox.ini").unlink()
+    poisoned = f"{pinned['addopts']} -p anything"
+    config.write_text(
+        f"""[tool.pytest.ini_options]
+addopts = {poisoned!r}
+markers = {pinned["markers"]!r}
+""",
+        encoding="utf-8",
+    )
+    assert gate_report.unapproved_settings() == [
+        "the settings the run would be given are not the pinned ones"
+    ]
+
+
+def test_a_file_the_index_stopped_looking_at_stops_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`git status` honours a flag that asks it to ignore a tracked file, so a
+    modified file can leave it silent. The manifest and the walk compare names,
+    and the name does not change, which leaves the index's own view of each
+    file as the only thing that still says the tree is the commit."""
+    from scripts import gate_report
+
+    flagged = ["h app/chunking.py", "H app/main.py"]
+    listing = {"status": "", "ls-files": "\n".join(flagged)}
+    monkeypatch.setattr(
+        gate_report, "_git", lambda *arguments: listing.get(arguments[0], "")
+    )
+    monkeypatch.setattr(gate_report, "MANIFEST", frozenset())
+    problems = gate_report.unaccepted_tree()
+    assert "app/chunking.py: the index was told to stop looking at it" in problems
+    assert "app/main.py: the index was told to stop looking at it" not in problems
+
 
 def test_what_the_tree_holds_is_read_before_the_run_it_would_report_on_starts(
     monkeypatch: pytest.MonkeyPatch,

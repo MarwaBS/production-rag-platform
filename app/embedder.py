@@ -16,6 +16,9 @@ import numpy as np
 
 from .config import get_settings
 
+# Chosen, not derived: a hash embedder trades collisions against vector width,
+# and nothing in this corpus fixes the number. What it costs is measured —
+# 128 buckets alias as vocabulary grows, in scale_cliff_derivation.json.
 _DIM = 128
 _settings = get_settings()
 _semantic_model: Any = None

@@ -23,7 +23,7 @@ import pathlib
 import subprocess
 import tempfile
 import tomllib
-from typing import Callable, Dict, List, Set
+from typing import Callable, Dict, List, Set, Tuple
 from xml.etree import ElementTree
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -35,9 +35,8 @@ _OUTCOMES = ("error", "failure", "skipped")
 
 CONFIG = REPO / "pyproject.toml"
 
-# Every file the repo carries. A run can execute anything that is here and
-# nothing that is not, so this is what a reviewer accepted rather than a list of
-# the names attacks have used so far.
+# Every file the repo carries. A run can execute anything here and nothing
+# that is not, so naming the whole set closes the names nobody has thought of.
 MANIFEST = frozenset(
     {
         ".github/workflows/ci.yml",
@@ -128,9 +127,9 @@ PYTEST_CONFIG = {
     ],
 }
 
-# Built, not filtered: a variable that survives is one somebody read. The first
-# six start an interpreter and its subprocesses; the rest resolve the home
-# directory the semantic job's cached model is found through.
+# Built, not filtered: a variable that survives is one somebody read. PATH
+# starts an interpreter and resolves the git every reading above runs; the rest
+# start subprocesses and resolve the home the cached model is found through.
 _INHERITED = (
     "PATH",
     "SYSTEMROOT",
@@ -202,27 +201,18 @@ def tracked_test_files() -> List[pathlib.Path]:
     )
 
 
-def _directories_in_tree() -> List[str]:
-    """Every directory under the repo, including the ones the file listing
-    prunes — pruning is what let bytecode sit here unread."""
-    found = []
-    for directory, names, _ in os.walk(REPO):
-        names[:] = [name for name in names if name not in _NOT_SOURCE - {_BYTECODE}]
+def _walk_tree() -> Tuple[List[str], List[str]]:
+    """The files under the repo and the bytecode directories among them, both
+    spelled the way git spells a path. Pruning rather than filtering, because
+    the installed environment alone holds tens of thousands of files."""
+    files: List[str] = []
+    bytecode: List[str] = []
+    for directory, names, found in os.walk(REPO):
         here = pathlib.Path(directory).relative_to(REPO)
-        found += [(here / name).as_posix() for name in names]
-    return sorted(found)
-
-
-def _files_in_tree() -> List[str]:
-    """Every file under the repo, spelled the way git spells one. The skipped
-    directories are pruned rather than filtered because the installed
-    environment alone holds tens of thousands of files."""
-    found = []
-    for directory, names, files in os.walk(REPO):
+        bytecode += [(here / name).as_posix() for name in names if name == _BYTECODE]
         names[:] = [name for name in names if name not in _NOT_SOURCE]
-        here = pathlib.Path(directory).relative_to(REPO)
-        found += [(here / name).as_posix() for name in files if name not in _NOT_SOURCE]
-    return sorted(found)
+        files += [(here / name).as_posix() for name in found if name not in _NOT_SOURCE]
+    return sorted(files), sorted(bytecode)
 
 
 def keyed(path: pathlib.Path, name: str) -> str:
@@ -253,6 +243,13 @@ def unaccepted_tree() -> List[str]:
         for line in _git("status", "--porcelain").splitlines()
         if line.strip()
     ]
+    # `status` honours the index flags that ask it to stop looking at a file,
+    # so the flags are read too: anything but H is a file it stopped tracking.
+    problems += [
+        f"{line[2:]}: the index was told to stop looking at it"
+        for line in _git("ls-files", "-v").splitlines()
+        if line and line[0] != "H"
+    ]
     tracked = tracked_files()
     problems += [
         f"{name}: carried and not in the manifest"
@@ -262,10 +259,9 @@ def unaccepted_tree() -> List[str]:
         f"{name}: in the manifest and no longer carried"
         for name in sorted(MANIFEST - tracked)
     ]
+    files, bytecode = _walk_tree()
     problems += [
-        f"{name}: in the tree and not carried"
-        for name in _files_in_tree()
-        if name not in tracked
+        f"{name}: in the tree and not carried" for name in files if name not in tracked
     ]
     problems += [
         f"{name}: importable, and imported before any command is read"
@@ -276,9 +272,7 @@ def unaccepted_tree() -> List[str]:
     # carries whatever it was compiled from. The run is pointed at a cache
     # outside the tree; what is left here would still reach this process.
     problems += [
-        f"{name}: bytecode read in place of the source beside it"
-        for name in _directories_in_tree()
-        if pathlib.PurePosixPath(name).name == _BYTECODE
+        f"{name}: bytecode read in place of the source beside it" for name in bytecode
     ]
     return problems
 
@@ -288,7 +282,7 @@ def unapproved_settings() -> List[str]:
     one file that command names."""
     problems = [
         f"{name}: a second place to take settings from"
-        for name in _files_in_tree()
+        for name in _walk_tree()[0]
         if pathlib.PurePosixPath(name).name in _OTHER_SETTINGS
     ]
     settings = tomllib.loads(CONFIG.read_text(encoding="utf-8"))

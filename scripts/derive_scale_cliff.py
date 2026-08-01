@@ -26,6 +26,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from evals.harness import CORPUS, QUERIES  # noqa: E402
 
+# Both chosen, neither derived. The sizes step by decades from the shipped
+# corpus to where the measured curve falls; eight words per distractor is a
+# judgement — enough to compete for buckets, cheap enough at ten thousand.
 CORPUS_SIZES: tuple[int, ...] = (24, 100, 1_000, 10_000)
 DISTRACTOR_WORDS = 8
 VOCABULARY: List[str] = sorted(
