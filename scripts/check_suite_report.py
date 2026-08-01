@@ -47,6 +47,10 @@ def _pytest_command(report: pathlib.Path) -> List[str]:
         "-m",
         "pytest",
         "-q",
+        # The settings this run gets are the ones read above, not whatever
+        # file happens to be found first.
+        "-c",
+        "pyproject.toml",
         # Named, because the run loads no plugin it was not told to load.
         "-p",
         "pytest_cov",

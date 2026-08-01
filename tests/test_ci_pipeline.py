@@ -19,6 +19,8 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
+from scripts.gate_report import PYTEST_CONFIG
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # The whole run line, not a substring of it. `: python scripts/...` contains the
@@ -44,14 +46,9 @@ def _runs(job: Dict[str, Any]) -> str:
 # what these sections let them: an exclude here, an addopts deselect there, and
 # the command is unchanged while the gate looks at nothing.
 TOOL_CONFIG = {
-    "pytest": {
-        "ini_options": {
-            "addopts": "-ra -m 'not semantic'",
-            "markers": [
-                "semantic: needs a semantic embedder; not satisfiable by the shipped one"
-            ],
-        }
-    },
+    # Pinned where the checker reads it before starting a run, not in a copy
+    # that a plugin loaded by the value being pinned would have deleted.
+    "pytest": {"ini_options": PYTEST_CONFIG},
     "mypy": {
         "python_version": "3.12",
         "warn_unused_configs": True,
@@ -72,10 +69,14 @@ def test_the_tools_the_gates_run_are_configured_as_pinned() -> None:
     """A pinned command is only as strong as what it is pointed at."""
     import tomllib
 
-    tools = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"]
+    settings = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    tools = settings["tool"]
     for name, expected in TOOL_CONFIG.items():
         assert tools.get(name) == expected, (name, tools.get(name))
-    assert "coverage" not in tools, tools.get("coverage")
+    assert set(tools) == set(TOOL_CONFIG) | {"hatch"}, sorted(tools)
+    # A distribution that registers one is a plugin pytest loads by name.
+    declared = {"entry-points", "scripts", "gui-scripts"} & set(settings["project"])
+    assert declared == set(), sorted(declared)
 
 
 def test_no_file_in_the_tree_reconfigures_a_tool_a_gate_runs() -> None:
@@ -88,21 +89,22 @@ def test_no_file_in_the_tree_reconfigures_a_tool_a_gate_runs() -> None:
         str(path.relative_to(ROOT))
         for path in ROOT.rglob("*")
         if path.name in TOOL_CONFIG_FILES
-        and ".venv" not in path.parts
+        and path.relative_to(ROOT).parts[0] != ".venv"
         and path != ROOT / "pyproject.toml"
     ]
     assert present == [], present
 
 
 # Every place a tracked file tells a gate to look away, and what it says there.
-# Each form is one tool's documented directive syntax, so the set of forms is
-# closed; the set of places is pinned, because adding one is how a live finding
-# leaves the report with the command, the config and the file list all correct.
+# One form per gate that reads one — the linter, the formatter, the type
+# checker, coverage — and the set of places is pinned, because adding one is how
+# a live finding leaves the report with the command and the config both correct.
 DIRECTIVES = (
     re.compile(r"#\s*noqa(:\s*[A-Z0-9, ]+)?"),
     re.compile(r"#\s*type:\s*ignore(\[[\w, -]+\])?"),
     re.compile(r"#\s*(ruff|flake8|mypy)\s*:\s*[^\n]*"),
-    re.compile(r"#\s*pragma:\s*no cover"),
+    re.compile(r"#\s*fmt:\s*(off|on|skip)"),
+    re.compile(r"#\s*pragma:\s*no\s+\w+"),
 )
 SUPPRESSIONS = {
     "scripts/derive_chunking.py": ("noqa:E402",),
@@ -143,10 +145,11 @@ def test_the_places_a_gate_is_told_to_look_away_are_the_pinned_ones() -> None:
 
 
 def test_the_linter_opens_every_python_file_the_repo_tracks() -> None:
-    """Pinning a config section proves what it says, not what the run does with
-    it: an exclusion reaching ruff from anywhere at all leaves `ruff check .`
-    reporting success over files it no longer opens. Ask it which files it
-    would open, and require every tracked one to be among them."""
+    """Pinning a config section proves what it says, not what the file list the
+    run walks turns out to be: a file dropped from that list is one `ruff check
+    .` reports nothing about. Ask ruff for the list. What this does not answer
+    is whether every file on it is judged — an exclusion in a config section
+    leaves a file listed and unjudged, which is why those are pinned too."""
     listed = subprocess.run(
         [sys.executable, "-m", "ruff", "check", ".", "--show-files"],
         capture_output=True,
@@ -186,6 +189,18 @@ def test_the_type_checker_still_reports_an_error_under_the_config_it_resolves() 
         )
     assert judged.returncode != 0, judged.stdout[-400:]
     assert "return-value" in judged.stdout, judged.stdout[-400:]
+
+
+def test_no_stub_stands_in_for_a_module_the_type_checker_would_judge() -> None:
+    """mypy reads a .pyi in place of the module beside it, so an error in that
+    module stops being reported with nothing in it changed and no directive in
+    either file. This project declares its types where the code is."""
+    stubs = [
+        str(path.relative_to(ROOT))
+        for path in ROOT.rglob("*.pyi")
+        if path.relative_to(ROOT).parts[0] != ".venv"
+    ]
+    assert stubs == [], stubs
 
 
 def test_nothing_in_the_tree_loads_itself_into_a_run() -> None:
@@ -508,6 +523,7 @@ ACTION_INPUTS = {
 # is closed by each tool's documented discovery order, not by the one example.
 TOOL_CONFIG_FILES = (
     "pyproject.toml",
+    ".helmignore",
     ".trivyignore",
     ".trivyignore.yaml",
     ".trivyignore.yml",
@@ -803,6 +819,7 @@ def test_the_checker_runs_the_marked_gates_and_records_them() -> None:
     argv = _pytest_command(report)
     assert argv[0] == sys.executable and argv[2] == "pytest", argv
     options = argv[3:]
+    assert options[options.index("-c") + 1] == "pyproject.toml", argv
     assert options[options.index("-m") + 1] == "semantic", argv
     assert f"--junitxml={report}" in options, argv
 
@@ -867,6 +884,39 @@ def test_the_run_is_started_with_nothing_loaded_its_command_did_not_name(
 
     assert check(runner=runner) == []
     assert seen["env"]["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1", "the run never got it"
+
+
+def test_a_second_place_to_take_settings_from_is_read_before_the_run(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`-p` in a settings file loads a plugin by name, which autoload being off
+    does not touch, into the position a conftest holds — over the suite whose
+    tests would otherwise be the thing objecting. So the settings are read from
+    the tree too, and only from the file the command names."""
+    from scripts import gate_report
+
+    config = tmp_path / "pyproject.toml"
+    config.write_text("", encoding="utf-8")
+    monkeypatch.setattr(gate_report, "REPO", tmp_path)
+    monkeypatch.setattr(gate_report, "CONFIG", config)
+    assert gate_report.unapproved_settings() == [
+        "the settings the run would be given are not the pinned ones"
+    ]
+
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "tox.ini").write_text("", encoding="utf-8")
+    pinned = gate_report.PYTEST_CONFIG
+    config.write_text(
+        f"""[tool.pytest.ini_options]
+addopts = {pinned["addopts"]!r}
+markers = {pinned["markers"]!r}
+""",
+        encoding="utf-8",
+    )
+    assert gate_report.unapproved_settings() == [
+        f"{pathlib.Path('pkg') / 'tox.ini'}: a second place the run would take "
+        "its settings from"
+    ]
 
 
 def test_a_conftest_is_refused_before_the_run_it_would_report_on_starts(
@@ -1004,5 +1054,7 @@ def test_the_suite_checker_runs_the_whole_suite_under_the_coverage_floor() -> No
     assert "--cov=app" in options and "--cov-fail-under=85" in options, argv
     assert f"--junitxml={report}" in options, argv
     assert "-m" not in options, argv
-    # Autoload is off for the run, so what it measures with has to be named.
+    # Autoload is off for the run, so what it measures with has to be named,
+    # and so does the file its settings come from.
     assert options[options.index("-p") + 1] == "pytest_cov", argv
+    assert options[options.index("-c") + 1] == "pyproject.toml", argv

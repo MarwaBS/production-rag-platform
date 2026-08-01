@@ -7,9 +7,12 @@ that ran nothing, and copied into place. So a check built on this starts the run
 itself, into a directory it creates outside the tree, and reads back only what
 that run wrote there.
 
-Which leaves what the run itself can do to that report. Anything loaded into the
-run is handed the path it writes and the status it exits on, so the run starts
-with nothing loaded into it that its own command did not name.
+Which leaves what the run itself can do to that report. Anything loaded into
+the run is handed the path it writes and the status it exits on, so the routes
+that load code into a run for being present rather than for being named — a
+conftest, a startup module, a settings file carrying `-p`, a registered plugin —
+are all closed before it starts. What remains inside the run is the code the
+tests import, which is the thing under review.
 """
 
 from __future__ import annotations
@@ -18,7 +21,8 @@ import os
 import pathlib
 import subprocess
 import tempfile
-from typing import Callable, Dict, List, Set
+import tomllib
+from typing import Callable, Dict, List, Sequence, Set
 from xml.etree import ElementTree
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -28,13 +32,30 @@ Runner = Callable[..., int]
 
 _OUTCOMES = ("error", "failure", "skipped")
 
+CONFIG = REPO / "pyproject.toml"
+
 # Names that need no naming: import happens because the file is there.
 _IMPORTED_ON_SIGHT = ("conftest.py", "sitecustomize.py", "usercustomize.py")
+
+# Where pytest would take its settings from if the command named nowhere.
+_OTHER_SETTINGS = ("pytest.ini", ".pytest.ini", "tox.ini", "setup.cfg")
+
+# What the file the command does name has to say. Read here and not by a test,
+# because what a settings file loads through `-p` is a plugin, holding the
+# position a conftest holds, over the suite that test would have been in.
+PYTEST_CONFIG = {
+    "addopts": "-ra -m 'not semantic'",
+    "markers": [
+        "semantic: needs a semantic embedder; not satisfiable by the shipped one"
+    ],
+}
 
 # Variables that add code or options to a run that did not ask for them.
 _UNSET = (
     "PYTEST_ADDOPTS",
     "PYTEST_PLUGINS",
+    "PYTHONNOUSERSITE",
+    "PYTHONUSERBASE",
     "PYTHONPATH",
     "PYTHONHOME",
     "PYTHONSTARTUP",
@@ -95,28 +116,46 @@ def environment() -> Dict[str, str]:
     return settings
 
 
+def _in_tree(names: Sequence[str]) -> List[str]:
+    """Everything under the repo with one of these names, the environment the
+    tools were installed into aside."""
+    found = (path.relative_to(REPO) for path in REPO.rglob("*"))
+    return sorted(
+        str(path) for path in found if path.name in names and path.parts[0] != ".venv"
+    )
+
+
 def auto_loaded() -> List[str]:
     """Files in the tree that the run imports for being there and nothing else:
     pytest reads a conftest from any directory on the way to a test, and the
-    interpreter imports these two before it reads the command at all."""
-    return sorted(
-        str(path.relative_to(REPO))
-        for path in REPO.rglob("*")
-        if path.name in _IMPORTED_ON_SIGHT and ".venv" not in path.parts
-    )
+    interpreter imports the other two before it reads the command at all."""
+    return _in_tree(_IMPORTED_ON_SIGHT)
+
+
+def unapproved_settings() -> List[str]:
+    """Anything deciding how the run behaves other than its own command and the
+    one file that command names."""
+    problems = [
+        f"{name}: a second place the run would take its settings from"
+        for name in _in_tree(_OTHER_SETTINGS)
+    ]
+    settings = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
+    if settings.get("tool", {}).get("pytest", {}).get("ini_options") != PYTEST_CONFIG:
+        problems.append("the settings the run would be given are not the pinned ones")
+    return problems
 
 
 def prove(required: Set[str], command: Command, runner: Runner) -> List[str]:
     """Run those tests and report whatever that run leaves unproven."""
     if not required:
         return ["no test is required: there is nothing to prove"]
-    # Read here rather than asked of the run: a conftest is loaded into the run,
-    # is handed the path it reports to, and can write whatever it likes there.
-    loaded = auto_loaded()
-    if loaded:
-        return [
-            f"{name}: loaded into the run that would be reporting" for name in loaded
-        ]
+    # Read here rather than asked of the run: each of these is loaded into the
+    # run, is handed the path it reports to, and can write what it likes there.
+    refusals = [
+        f"{name}: loaded into the run that would be reporting" for name in auto_loaded()
+    ] + unapproved_settings()
+    if refusals:
+        return refusals
     with tempfile.TemporaryDirectory() as scratch:
         # A path opened by this process outside the tree: whatever the repo or an
         # earlier step may hold, it is not what gets read back here.

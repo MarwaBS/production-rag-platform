@@ -31,6 +31,10 @@ def _pytest_command(report: pathlib.Path) -> List[str]:
         "-m",
         "pytest",
         "-q",
+        # The settings this run gets are the ones read above, not whatever
+        # file happens to be found first.
+        "-c",
+        "pyproject.toml",
         "-m",
         "semantic",
         f"--junitxml={report}",

@@ -134,7 +134,7 @@ Full summaries in **[docs/decisions/](docs/decisions/)**:
 ## CI/CD
 
 **This repository's own CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every pull request and every push to `main`:
-`ruff` lint + format check · `mypy` · `pip-audit` on the source tree's dependencies · `pytest` integration
+`ruff` lint + format check · `mypy` · `pip-audit` on the environment those pins install · `pytest` integration
 tests **under an 85% coverage floor**, started by [`scripts/check_suite_report.py`](scripts/check_suite_report.py) so
 the build fails unless every test the tracked files define — bar the semantic-marked ones, which the `semantic` job
 below proves the same way — appears in that run's report as having passed; a green run does not otherwise say which
