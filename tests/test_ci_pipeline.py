@@ -37,6 +37,55 @@ def _runs(job: Dict[str, Any]) -> str:
     return "\n".join(step.get("run", "") for step in job.get("steps", []))
 
 
+# What the gates read besides the workflow. `ruff check .` and
+# `pytest --cov-fail-under=85` are pinned line for line and still examine only
+# what these sections let them: an exclude here, an addopts deselect there, and
+# the command is unchanged while the gate looks at nothing.
+TOOL_CONFIG = {
+    "pytest": {
+        "ini_options": {
+            "addopts": "-ra -m 'not semantic'",
+            "markers": [
+                "semantic: needs a semantic embedder; not satisfiable by the shipped one"
+            ],
+        }
+    },
+    "ruff": {
+        "target-version": "py312",
+        "lint": {
+            "select": ["F", "E"],
+            "ignore": ["E501"],
+            "per-file-ignores": {"tests/**": ["F401", "F841"]},
+        },
+    },
+}
+
+
+def test_the_tools_the_gates_run_are_configured_as_pinned() -> None:
+    """A pinned command is only as strong as what it is pointed at."""
+    import tomllib
+
+    tools = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"]
+    for name, expected in TOOL_CONFIG.items():
+        assert tools.get(name) == expected, (name, tools.get(name))
+    assert "coverage" not in tools, tools.get("coverage")
+
+
+def test_nothing_reshapes_collection_from_a_conftest() -> None:
+    """A conftest can drop files from collection, and it can also let them be
+    collected and mark every test skipped, which the listing check below cannot
+    see. This repo has none. Note what this check cannot be: a conftest that
+    skips everything skips this too, so it catches the arrival of one only
+    while the suite is still running. What closes that class is a report of the
+    run read from outside it, the way the semantic gates are already proven."""
+    found = [
+        str(path.relative_to(ROOT))
+        for path in ROOT.rglob("conftest.py")
+        if ".venv" not in path.parts
+    ]
+    assert found == [], found
+
+
 def test_every_tracked_test_file_is_collected() -> None:
     """The suite that runs has to be the suite that exists. A conftest naming
     files in collect_ignore drops them with nothing else changing: the run is
