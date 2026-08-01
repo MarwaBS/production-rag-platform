@@ -267,29 +267,36 @@ def test_a_file_whose_content_left_the_index_stops_the_run(
     assert "app/main.py: its content is not what the index records" not in problems
 
 
-def test_the_content_is_hashed_as_it_sits_on_disk(
-    monkeypatch: pytest.MonkeyPatch,
+def test_a_filter_between_a_file_and_its_hash_stops_the_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
-    """Hashing runs whatever clean filter the repo has been given, and the file
-    that installs one is untracked and never cloned — so the comparison would be
-    against what the filter makes of the bytes rather than the bytes."""
+    """Hashing applies whatever the repo has been told to apply, so a filter
+    would sit between a file and the hash it is compared to. Both sources that
+    can select one live outside the tree: an attributes file under the git
+    directory, and one named in config. A tracked .gitattributes is not in the
+    manifest, so it is refused already."""
     from scripts import gate_report
 
-    asked: list[tuple[str, ...]] = []
+    monkeypatch.setattr(gate_report, "REPO", tmp_path)
+    monkeypatch.setattr(gate_report, "MANIFEST", frozenset())
+    monkeypatch.setattr(gate_report, "tracked_files", set)
+    monkeypatch.setattr(gate_report, "_git", lambda *a, **k: "")
+    assert not [p for p in gate_report.unaccepted_tree() if "filter" in p]
 
-    def git(*arguments: str, **_: str) -> str:
-        asked.append(arguments)
-        return (
-            "100644 aaaa 0" + chr(9) + "app/main.py"
-            if arguments[:2] == ("ls-files", "-s")
-            else ""
-        )
+    (tmp_path / ".git" / "info").mkdir(parents=True)
+    (tmp_path / ".git" / "info" / "attributes").write_text("", encoding="utf-8")
+    assert ".git/info/attributes: it can put a filter between a file and its hash" in (
+        gate_report.unaccepted_tree()
+    )
 
-    monkeypatch.setattr(gate_report, "_git", git)
-    gate_report._changed_since_the_index()
-    hashing = [call for call in asked if call[0] == "hash-object"]
-    assert hashing, asked
-    assert "--no-filters" in hashing[0], hashing[0]
+    monkeypatch.setattr(
+        gate_report,
+        "_git",
+        lambda *a, **k: "~/.gitattributes" if a[:2] == ("config", "--get") else "",
+    )
+    assert "core.attributesFile: it can put a filter between a file and its hash" in (
+        gate_report.unaccepted_tree()
+    )
 
 
 def test_a_file_the_index_stopped_looking_at_stops_the_run(

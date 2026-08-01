@@ -188,8 +188,7 @@ def _changed_since_the_index() -> List[str]:
     """Tracked files whose content differs from what the index records.
 
     Compared by hash and not by `status`, which trusts a stat cache: an edit of
-    equal size with the recorded time put back leaves it silent. The hash is
-    taken of the bytes on disk, not of what a filter would make of them."""
+    equal size with the recorded time put back leaves it silent."""
     recorded = {}
     for line in _git("ls-files", "-s").splitlines():
         details, _, name = line.partition("\t")
@@ -197,11 +196,9 @@ def _changed_since_the_index() -> List[str]:
     names = sorted(recorded)
     if not names:
         return []
-    # --no-filters: hashing without it runs any clean filter the repo has been
-    # given, and the file installing one is untracked and never cloned.
-    hashed = _git(
-        "hash-object", "--no-filters", "--stdin-paths", stdin="\n".join(names)
-    ).split()
+    # Hashed the way the index was written, line endings and all. What could
+    # stand between the two is a clean filter, refused rather than bypassed.
+    hashed = _git("hash-object", "--stdin-paths", stdin="\n".join(names)).split()
     return [name for name, digest in zip(names, hashed) if digest != recorded[name]]
 
 
@@ -289,6 +286,18 @@ def unaccepted_tree() -> List[str]:
         f"{line[2:]}: the index was told to stop looking at it"
         for line in _git("ls-files", "-v").splitlines()
         if line and line[0] != "H"
+    ]
+    # A clean filter stands between a file and its hash, and both the attribute
+    # naming one and the config defining it are untracked and never cloned.
+    problems += [
+        f"{source}: it can put a filter between a file and its hash"
+        for source in (".git/info/attributes",)
+        if (REPO / source).exists()
+    ]
+    problems += [
+        "core.attributesFile: it can put a filter between a file and its hash"
+        for line in [_git("config", "--get", "core.attributesFile")]
+        if line.strip()
     ]
     problems += [
         f"{name}: its content is not what the index records"
