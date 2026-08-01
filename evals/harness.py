@@ -57,7 +57,8 @@ PARAPHRASE_QUERIES: tuple[tuple[str, int], ...] = (
     ("machine readable inventory enumerating everything shipped with releases", 10),
     ("parseable event records engineers can search when volume grows", 11),
     # Oblique asks that compete with the distractors (Grafana vs Prometheus,
-    # Terraform vs Helm, ...) — these keep the measured baseline below 1.000.
+    # Terraform vs Helm, ...) — both recall@3 misses fall here. recall@1 also
+    # misses one of the direct asks above, so it is lower for another reason.
     ("sampled counters graphed over the day with pages raised on anomalies", 2),
     ("declarative reconciliation keeping desired workload state on a fleet", 3),
     ("immutable userland snapshots assembled stepwise for shipping", 5),

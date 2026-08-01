@@ -9,6 +9,7 @@ which is why the deploy-posture file makes the same trade.
 
 from __future__ import annotations
 
+import ast
 import pathlib
 import re
 import subprocess
@@ -115,8 +116,8 @@ DIRECTIVES = tuple(
 )
 
 # Every decorator the repo uses. A waiver can be spelled as any name that
-# resolves to one — an alias, an attribute of an aliased module — which a
-# reader over text cannot follow, so what is read is the set of names itself.
+# resolves to one, and after `@` python takes any expression at all, so the
+# names are read from the parse tree rather than matched against a surface form.
 DECORATORS = frozenset(
     {
         "@app.get",
@@ -129,7 +130,28 @@ DECORATORS = frozenset(
         "@pytest.mark.semantic",
     }
 )
-_DECORATOR = re.compile(r"^\s*(@[A-Za-z_][A-Za-z0-9_.]*)", re.MULTILINE)
+
+
+def _decorators() -> set[str]:
+    """Every decorator applied anywhere in tracked python, named the way it is
+    written. A call is reduced to what is being called, so a parametrised mark
+    reads as the mark."""
+    applied = set()
+    for name in _tracked("*.py"):
+        tree = ast.parse((ROOT / name).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            ):
+                continue
+            for applied_to in node.decorator_list:
+                target = (
+                    applied_to.func if isinstance(applied_to, ast.Call) else applied_to
+                )
+                applied.add(f"@{ast.unparse(target)}")
+    return applied
+
+
 SUPPRESSIONS = {
     "scripts/derive_chunking.py": ("noqa:E402",),
     "scripts/derive_eval_floors.py": ("noqa:E402", "noqa:E402"),
@@ -181,11 +203,7 @@ def test_every_decorator_in_the_tree_is_one_that_has_been_read() -> None:
     """A decorator waives what a comment does and leaves no comment behind, and
     the name it is spelled with need not be the name it resolves to. Reading
     the names that are here beats matching the spellings a reader thought of."""
-    found = {
-        match
-        for name in _tracked("*.py")
-        for match in _DECORATOR.findall((ROOT / name).read_text(encoding="utf-8"))
-    }
+    found = _decorators()
     assert found == DECORATORS, sorted(found ^ DECORATORS)
 
 

@@ -343,12 +343,21 @@ def test_a_file_the_repo_was_told_to_ignore_is_still_in_the_tree(
     # so the names are pruned where caches live and not wherever they appear.
     (tmp_path / "pkg" / ".ruff_cache").mkdir()
     (tmp_path / "pkg" / ".ruff_cache" / "probe").write_text("", encoding="utf-8")
+    # The same for a file: an ignored name below the root is still in the tree.
+    (tmp_path / "pkg" / ".coverage").write_text("", encoding="utf-8")
+    # A link is stepped over rather than into, so whatever is behind one would
+    # be in the tree and unread. The answer is stubbed because creating one
+    # needs a privilege the runner may not have.
+    (tmp_path / "linked").mkdir()
+    monkeypatch.setattr(gate_report, "_is_link", lambda path: path.name == "linked")
     monkeypatch.setattr(gate_report, "REPO", tmp_path)
     monkeypatch.setattr(gate_report, "tracked_files", set)
     monkeypatch.setattr(gate_report, "MANIFEST", frozenset())
     problems = gate_report.unaccepted_tree()
     assert "pkg/ignored.key: in the tree and not carried" in problems
     assert "pkg/.ruff_cache/probe: in the tree and not carried" in problems
+    assert "pkg/.coverage: in the tree and not carried" in problems
+    assert "linked: in the tree and not carried" in problems
 
 
 def test_bytecode_left_in_the_tree_stops_the_run(

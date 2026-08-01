@@ -1,8 +1,9 @@
 """Retrieval-quality gates over the service's own /index and /query routes.
 
 The floors come from scripts/derive_eval_floors.py (semantic backend on the
-paraphrase set, the one non-saturated baseline). The same bar asked of the
-default hash path on the literal set is a wiring gate it clears with headroom.
+paraphrase set, the one non-saturated baseline). The default hash path is gated
+against floors derived from its own literal-set measurement, at the same half a
+miss of margin — its own bar, not this one.
 """
 
 from __future__ import annotations

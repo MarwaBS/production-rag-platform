@@ -4,8 +4,8 @@ Baseline: the semantic backend on the zero-overlap paraphrase set — the one
 instrument here that is not saturated (the literal set is solvable by token
 matching on either backend). Floor rule: measured minus half a miss-quantum
 (0.5/n); the pipeline is deterministic, so the first additional recall miss
-trips it. MRR moves in finer steps than that margin, so recall is the binding
-metric and the MRR floor guards larger collapses.
+trips it. The MRR steps straddle that margin — a first place slipping to second
+trips the MRR floor as well, a second slipping to third does not.
 
 Needs the `semantic` extra. Run:
     python scripts/derive_eval_floors.py            # rewrite the committed file

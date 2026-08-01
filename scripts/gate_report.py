@@ -127,8 +127,8 @@ PYTEST_CONFIG = {
 }
 
 # Built, not filtered: a variable that survives is one somebody read. PATH
-# starts an interpreter and resolves the git every reading above runs; the rest
-# start subprocesses and resolve the home the cached model is found through.
+# resolves the git every reading above runs, TEMP and TMP decide where the
+# report gets written, and the rest resolve the home holding the cached model.
 _INHERITED = (
     "PATH",
     "SYSTEMROOT",
@@ -220,23 +220,41 @@ def tracked_test_files() -> List[pathlib.Path]:
     )
 
 
+def _is_link(path: pathlib.Path) -> bool:
+    """Whether os.walk will step over this rather than into it."""
+    return path.is_symlink() or path.is_junction()
+
+
 def _walk_tree() -> Tuple[List[str], List[str]]:
-    """The files under the repo and the bytecode directories among them, both
-    spelled the way git spells a path. Pruning rather than filtering, because
-    the installed environment alone holds tens of thousands of files."""
+    """The files under the repo, the links among them, and the bytecode
+    directories, all spelled the way git spells a path. Pruning rather than
+    filtering, because the installed environment alone holds tens of thousands
+    of files."""
     files: List[str] = []
     bytecode: List[str] = []
+    linked: List[str] = []
     for directory, names, found in os.walk(REPO):
         here = pathlib.Path(directory).relative_to(REPO)
         bytecode += [(here / name).as_posix() for name in names if name == _BYTECODE]
         root = here == pathlib.Path(".")
+        # os.walk neither descends a link nor lists it as a file, so whatever
+        # is on the far side of one would be in the tree and unread.
+        linked += [
+            (here / name).as_posix()
+            for name in names
+            if _is_link(pathlib.Path(directory) / name)
+        ]
         names[:] = [
             name
             for name in names
             if name != _BYTECODE and not (root and name in _NOT_SOURCE)
         ]
-        files += [(here / name).as_posix() for name in found if name not in _NOT_SOURCE]
-    return sorted(files), sorted(bytecode)
+        files += [
+            (here / name).as_posix()
+            for name in found
+            if not (root and name in _NOT_SOURCE)
+        ]
+    return sorted(files + linked), sorted(bytecode)
 
 
 def keyed(path: pathlib.Path, name: str) -> str:

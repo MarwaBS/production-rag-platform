@@ -337,16 +337,3 @@ def test_the_window_derivation_holds_against_the_real_tokenizer() -> None:
     over = tokenizer("漢" * (window + 1), truncation=False)["input_ids"]
     assert len(fits) == model.max_seq_length, len(fits)
     assert len(over) > model.max_seq_length, len(over)
-
-
-def test_the_type_checker_scaffold_is_removed_once_the_splitter_lands() -> None:
-    """The override that lets the type checker ignore a module that does not yet
-    exist must not outlive it, or it hides real errors in the shipped one."""
-    import pathlib
-
-    root = pathlib.Path(__file__).resolve().parent.parent
-    if not (root / "app" / "chunking.py").exists():
-        pytest.skip("the splitter has not landed yet")
-    assert 'module = ["app.chunking"]' not in (root / "pyproject.toml").read_text(
-        encoding="utf-8"
-    ), "app/chunking.py exists, so its missing-import override is now dead config"

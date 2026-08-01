@@ -38,9 +38,9 @@ class Settings(BaseSettings):
     max_query_chars: int = Field(default=1_000, ge=1)
     max_top_k: int = Field(default=50, ge=1)
     max_request_bytes: int = Field(default=10_485_760, ge=1)  # 10 MiB
-    # Chunking constants are DERIVED, not chosen — scripts/derive_chunking.py
-    # measures them and commits chunking_derivation.json; a gate re-runs the
-    # producer and pins these defaults against it.
+    # Both come from scripts/derive_chunking.py, which a gate re-runs against
+    # these defaults: the overlap is measured over the corpus, the window is
+    # arithmetic on the embedding model's own stated limit.
     max_chunk_chars: int = Field(default=254, ge=1)
     chunk_overlap_chars: int = Field(default=83, ge=1)
     # LLM resilience: timeout, bounded retry, consecutive-failure breaker.
