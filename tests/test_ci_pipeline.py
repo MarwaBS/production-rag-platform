@@ -1,9 +1,10 @@
 """The CI gates the README advertises must exist in the pipeline definition.
 
-Text gates on config, the same trade the deploy-posture file states: they catch
-deletion and renaming, not every malformed edit; the real pipeline executing is
-what closes the residual. A coverage floor or audit step that only ever existed
-in prose fails nothing when it silently disappears.
+These read the workflow file; they do not run it. What they can establish is
+that each gate is present, that its command is exactly what it claims to be, and
+that nothing in the file reduces what it examines. What no reading of the file
+can establish is that the runner behaved — only the pipeline executing does
+that, which is why the deploy-posture file makes the same trade.
 """
 
 from __future__ import annotations
@@ -96,6 +97,7 @@ def test_ci_type_checks_every_directory_that_ships_python() -> None:
 
 WORKFLOW_KEYS = {"name", True, "jobs"}
 JOB_KEYS = {"runs-on", "steps", "needs", "permissions", "env"}
+JOB_ENV = {"IMAGE"}
 STEP_KEYS = {"name", "run", "uses", "with"}
 PUBLISH_STEP_KEYS = STEP_KEYS | {"if", "id"}
 
@@ -112,6 +114,12 @@ def _unvetted_keys(workflow: Dict[Any, Any], job: Dict[str, Any]) -> List[str]:
     """
     problems = [f"workflow: {key}" for key in workflow if key not in WORKFLOW_KEYS]
     problems += [f"job: {key}" for key in job if key not in JOB_KEYS]
+    # Job-level env reaches every step in the job and is strictly stronger than
+    # the step-level form refused below: PYTEST_ADDOPTS=--no-cov set here
+    # removes the coverage floor while its run line still reads correctly.
+    problems += [
+        f"job env: {key}" for key in job.get("env") or {} if key not in JOB_ENV
+    ]
     for step in job.get("steps", []):
         allowed = PUBLISH_STEP_KEYS if step.get("if") else STEP_KEYS
         where = step.get("name") or step.get("uses") or step.get("run")
@@ -206,9 +214,53 @@ ADVERTISED_COMMANDS = (
     "helm template",
     PROVE_SEMANTIC,
 )
-# The inputs each vetted action may carry. Pinning `exit-code` and `severity`
-# left the keys that excuse findings — skip-dirs, trivyignores, ignore-policy —
-# free to arrive later, so the direction is reversed here too.
+# What each gate step runs, line for line. Asking whether a command APPEARS
+# admits every way of having it present and inert: quoted in a comment, echoed,
+# fenced in a heredoc, or followed by an excuse like `|| true`. These bodies are
+# ours, so they are a closed set and can be pinned rather than searched.
+GATE_RUNS = {
+    "Lint": ("ruff check .",),
+    "Format check": ("ruff format --check .",),
+    "Type-check": ("mypy app evals scripts tests",),
+    "Audit Python dependencies (pip-audit)": (
+        "pip install pip-audit -c constraints-dev.txt",
+        "pip-audit",
+    ),
+    "Integration tests (coverage floor enforced)": (
+        "pytest -q --cov=app --cov-fail-under=85",
+    ),
+    "Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)": (
+        "python -m evals",
+    ),
+    "Paraphrase floor + floor-derivation reproduce (semantic-marked gates)": (
+        PROVE_SEMANTIC,
+    ),
+    "Helm lint + render": (
+        "helm lint deploy/helm",
+        "helm template release deploy/helm > /dev/null",
+    ),
+}
+
+# Every input every action may carry. Restricting only the scanners left the
+# builder free to publish a different stage, and checkout free to fetch a
+# different tree — neither needs a key anyone had thought to forbid.
+ACTION_INPUTS = {
+    "actions/checkout": set(),
+    "actions/setup-python": {"python-version"},
+    "actions/cache": {"path", "key"},
+    "azure/setup-helm": set(),
+    "docker/setup-buildx-action": set(),
+    "docker/login-action": {"registry", "username", "password"},
+    "docker/build-push-action": {"context", "file", "load", "push", "tags"},
+}
+# Config files these tools read from the repo root without being told to. An
+# ignore file excuses findings with the workflow untouched.
+TOOL_IGNORE_FILES = (
+    ".trivyignore",
+    ".trivyignore.yaml",
+    ".hadolint.yaml",
+    ".hadolint.yml",
+)
 VETTED_INPUTS = {
     "aquasecurity/trivy-action": {
         "image-ref",
@@ -223,6 +275,7 @@ VETTED_INPUTS = {
     "hadolint/hadolint-action": {"dockerfile", "failure-threshold"},
 }
 ADVERTISED_ACTIONS = tuple(VETTED_INPUTS)
+ACTION_INPUTS.update(VETTED_INPUTS)
 
 
 def _steps(workflow: Dict[Any, Any]) -> List[Dict[str, Any]]:
@@ -264,31 +317,50 @@ def _conditional_gates(workflow: Dict[Any, Any]) -> List[Dict[str, Any]]:
 
 
 def test_every_command_the_readme_advertises_runs_in_the_pipeline() -> None:
-    """Each is sold as a gate, and deleting any of their steps was silent —
-    including by moving the command into a shell comment beside it."""
-    lines = [
-        line for step in _steps(_ci()) for line in _uncommented(step.get("run", ""))
-    ]
-    for command in ADVERTISED_COMMANDS:
-        assert any(command in line for line in lines), command
+    """Each is sold as a gate. Presence is not the property — a command can be
+    echoed, fenced in a heredoc or excused with `|| true` and still be there —
+    so each gate step's body has to be exactly what it is supposed to run."""
+    named = {step.get("name"): step for step in _steps(_ci())}
+    for name, expected in GATE_RUNS.items():
+        step = named.get(name)
+        assert step, f"the {name} step is gone"
+        body = tuple(
+            line.strip() for line in _uncommented(step.get("run", "")) if line.strip()
+        )
+        assert body == expected, (name, body)
 
 
 def test_every_action_the_readme_advertises_is_present_and_can_fail() -> None:
     """Present is half of it: a scan that reports and exits zero, or one told to
     skip every directory it would have looked in, is decoration with a tick."""
     workflow = _ci()
+    for step in _steps(workflow):
+        action = step.get("uses", "").split("@")[0]
+        if not action:
+            continue
+        allowed = ACTION_INPUTS.get(action)
+        assert allowed is not None, f"{action} has no vetted input list"
+        assert set(step.get("with") or {}) <= allowed, (action, step.get("with"))
+    for ignore_file in TOOL_IGNORE_FILES:
+        assert not (ROOT / ignore_file).exists(), ignore_file
     for name, vetted in VETTED_INPUTS.items():
         steps = _action(workflow, name)
-        assert steps, name
+        # Exactly one: a second, later step of the same action overwrites what
+        # the first produced, and every read below takes the first.
+        assert len(steps) == 1, (name, len(steps))
         for step in steps:
             # An exact version, so a re-pointed tag cannot change the verdict
-            # without changing this file. The setup actions below float on
-            # majors deliberately; these decide something.
+            # without changing this file. The actions not listed here still
+            # float on major tags, which is a weaker position, not a defended
+            # one — their inputs are pinned above but their code is not.
             assert re.fullmatch(r"v\d+\.\d+\.\d+", step["uses"].split("@")[1]), step
             assert set(step["with"]) <= vetted, set(step["with"]) - vetted
     scan = _action(workflow, "aquasecurity/trivy-action")[0]["with"]
+    # The values, not just the keys: os-only drops every library CVE, and
+    # CRITICAL-only drops the HIGH the step's own name promises.
     assert scan["exit-code"] == "1", scan
-    assert "CRITICAL" in scan["severity"], scan
+    assert scan["severity"] == "HIGH,CRITICAL", scan
+    assert scan["vuln-type"] == "os,library", scan
     lint = _action(workflow, "hadolint/hadolint-action")[0]["with"]
     assert lint["failure-threshold"] == "error", lint
     assert (ROOT / lint["dockerfile"]).is_file(), lint
@@ -312,6 +384,12 @@ def test_what_gets_scanned_is_what_gets_built_and_what_gets_pushed() -> None:
     assert len(published) == 1, published
     for shared in ("context", "file"):
         assert published[0]["with"][shared] == build[shared], shared
+    # The chart's appVersion tag must be among them, or a bare `helm install`
+    # resolves a tag that was never pushed.
+    tags = published[0]["with"]["tags"].split()
+    assert any("app_version" in tag for tag in tags), tags
+    assert any(tag.endswith(":latest") for tag in tags), tags
+    assert any("github.sha" in tag for tag in tags), tags
 
 
 def test_the_sbom_that_is_uploaded_is_the_sbom_that_was_generated() -> None:

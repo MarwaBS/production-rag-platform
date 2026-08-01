@@ -96,7 +96,7 @@ jobs:
           tags: ${{ env.IMAGE }}:ci
       - name: Trivy image scan (fail on fixable HIGH/CRITICAL)
         # Pinned to an exact version so a re-pointed tag cannot change the
-        # verdict. The setup actions float on majors; these decide something.
+        # verdict. The actions without an exact pin still float on majors.
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:ci
