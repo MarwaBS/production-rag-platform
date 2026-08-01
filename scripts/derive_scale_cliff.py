@@ -42,6 +42,8 @@ VOCABULARY: List[str] = sorted(
 FOREIGN: List[str] = [f"unrelated{index}" for index in range(len(VOCABULARY))]
 
 
+# The two multipliers are arbitrary and shared by both arms: they spread the
+# selection across the pool, and cancel in the comparison the curve is for.
 def _words(index: int, vocabulary: List[str], count: int) -> str:
     return " ".join(
         vocabulary[(index * 7 + offset * 13) % len(vocabulary)]

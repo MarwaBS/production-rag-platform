@@ -49,6 +49,9 @@ ignore = ["E501"]
 [tool.mypy]
 python_version = "3.12"
 warn_unused_configs = true
+# Off by default, and a function with no annotation anywhere is then a body
+# nothing judges — a waiver that leaves neither a directive nor a decorator.
+check_untyped_defs = true
 
 # rag-llm-infra ships no py.typed marker yet, so mypy can't see its types.
 # Scope the missing-imports allowance to that package only — everything else

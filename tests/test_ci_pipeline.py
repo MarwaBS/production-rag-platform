@@ -52,6 +52,7 @@ TOOL_CONFIG = {
     "mypy": {
         "python_version": "3.12",
         "warn_unused_configs": True,
+        "check_untyped_defs": True,
         "overrides": [{"module": ["rag_llm_infra.*"], "ignore_missing_imports": True}],
     },
     "ruff": {
@@ -352,8 +353,8 @@ def _unvetted_keys(workflow: Dict[Any, Any], job: Dict[str, Any]) -> List[str]:
     problems = [f"workflow: {key}" for key in workflow if key not in WORKFLOW_KEYS]
     problems += [f"job: {key}" for key in job if key not in JOB_KEYS]
     # Job-level env reaches every step in the job and is strictly stronger than
-    # the step-level form refused below: PYTEST_ADDOPTS=--no-cov set here
-    # removes the coverage floor while its run line still reads correctly.
+    # the step-level form refused below. It cannot touch the checker's own run,
+    # which is handed a built environment — it reaches the steps beside it.
     problems += [
         f"job env: {key}" for key in job.get("env") or {} if key not in JOB_ENV
     ]

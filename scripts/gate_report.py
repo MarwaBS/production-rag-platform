@@ -9,9 +9,9 @@ that run wrote there.
 
 Which leaves what the run can do to that report, since it is handed the path it
 writes and the status it exits on. So what is named here is not the ways in but
-the other side: the files the repo carries, the settings the run is given, and
-the variables it starts with. A run begins only from those, and what executes
-inside it is then the code the tests import, which is the thing under review.
+the other side: a run begins only from the files the repo carries, the settings
+it is given and the variables it starts with, which leaves the code the tests
+import — the thing under review.
 """
 
 from __future__ import annotations
@@ -102,15 +102,7 @@ MANIFEST = frozenset(
 # like one of them; bytecode is refused outright rather than skipped anywhere.
 _BYTECODE = "__pycache__"
 _NOT_SOURCE = frozenset(
-    {
-        ".coverage",
-        ".git",
-        ".mypy_cache",
-        ".pytest_cache",
-        ".ruff_cache",
-        ".venv",
-        _BYTECODE,
-    }
+    {".coverage", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".venv"}
 )
 
 # Where pytest would take its settings from if the command named nowhere.
@@ -127,8 +119,8 @@ PYTEST_CONFIG = {
 }
 
 # Built, not filtered: a variable that survives is one somebody read. PATH
-# resolves the git every reading above runs, TEMP and TMP decide where the
-# report gets written, and the rest resolve the home holding the cached model.
+# resolves the git every reading runs, TEMP and TMP decide where the report is
+# written, four resolve the home holding the cached model, three start a shell.
 _INHERITED = (
     "PATH",
     "SYSTEMROOT",
@@ -148,7 +140,8 @@ _IMPOSED = {
     "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
     # The user site directory is where a usercustomize module would come from.
     "PYTHONNOUSERSITE": "1",
-    # Test names carry en dashes; the console default here cannot encode them.
+    # Docstrings and assertion text carry em dashes, which the console
+    # default on this platform cannot encode.
     "PYTHONIOENCODING": "utf-8",
 }
 
@@ -195,7 +188,8 @@ def _changed_since_the_index() -> List[str]:
     """Tracked files whose content differs from what the index records.
 
     Compared by hash and not by `status`, which trusts a stat cache: an edit of
-    equal size with the recorded time put back leaves it silent."""
+    equal size with the recorded time put back leaves it silent. The hash is
+    taken of the bytes on disk, not of what a filter would make of them."""
     recorded = {}
     for line in _git("ls-files", "-s").splitlines():
         details, _, name = line.partition("\t")
@@ -203,7 +197,11 @@ def _changed_since_the_index() -> List[str]:
     names = sorted(recorded)
     if not names:
         return []
-    hashed = _git("hash-object", "--stdin-paths", stdin="\n".join(names)).split()
+    # --no-filters: hashing without it runs any clean filter the repo has been
+    # given, and the file installing one is untracked and never cloned.
+    hashed = _git(
+        "hash-object", "--no-filters", "--stdin-paths", stdin="\n".join(names)
+    ).split()
     return [name for name, digest in zip(names, hashed) if digest != recorded[name]]
 
 
