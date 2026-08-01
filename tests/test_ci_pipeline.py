@@ -226,8 +226,8 @@ ADVERTISED_COMMANDS = (
 # every later step. The steps are ours, so this set is closed too.
 PIPELINE_STEPS = {
     "test": (
-        (None, "actions/checkout", ()),
-        (None, "actions/setup-python", ()),
+        (None, "actions/checkout@v4", ()),
+        (None, "actions/setup-python@v5", ()),
         (None, None, ("python -m pip install --upgrade pip",)),
         (
             "Install (pulls rag-llm-infra from PyPI; dev toolchain pinned)",
@@ -254,9 +254,9 @@ PIPELINE_STEPS = {
         ),
     ),
     "semantic": (
-        (None, "actions/checkout", ()),
-        (None, "actions/setup-python", ()),
-        ("Cache the embedding model", "actions/cache", ()),
+        (None, "actions/checkout@v4", ()),
+        (None, "actions/setup-python@v5", ()),
+        ("Cache the embedding model", "actions/cache@v4", ()),
         (None, None, ("python -m pip install --upgrade pip",)),
         (
             "Install with the semantic extra",
@@ -270,27 +270,31 @@ PIPELINE_STEPS = {
         ),
     ),
     "iac": (
-        (None, "actions/checkout", ()),
-        (None, "azure/setup-helm", ()),
+        (None, "actions/checkout@v4", ()),
+        (None, "azure/setup-helm@v4", ()),
         (
             "Helm lint + render",
             None,
             ("helm lint deploy/helm", "helm template release deploy/helm > /dev/null"),
         ),
-        ("Lint Dockerfile (hadolint)", "hadolint/hadolint-action", ()),
+        ("Lint Dockerfile (hadolint)", "hadolint/hadolint-action@v3.1.0", ()),
     ),
     "docker": (
-        (None, "actions/checkout", ()),
-        ("Set up Buildx", "docker/setup-buildx-action", ()),
-        ("Build image (load locally for scan + SBOM)", "docker/build-push-action", ()),
+        (None, "actions/checkout@v4", ()),
+        ("Set up Buildx", "docker/setup-buildx-action@v3", ()),
         (
-            "Trivy image scan (fail on fixable HIGH/CRITICAL)",
-            "aquasecurity/trivy-action",
+            "Build image (load locally for scan + SBOM)",
+            "docker/build-push-action@v6",
             (),
         ),
-        ("Generate CycloneDX SBOM", "anchore/sbom-action", ()),
-        ("Upload SBOM artifact", "actions/upload-artifact", ()),
-        ("Log in to GHCR", "docker/login-action", ()),
+        (
+            "Trivy image scan (fail on fixable HIGH/CRITICAL)",
+            "aquasecurity/trivy-action@v0.36.0",
+            (),
+        ),
+        ("Generate CycloneDX SBOM", "anchore/sbom-action@v0.24.0", ()),
+        ("Upload SBOM artifact", "actions/upload-artifact@v4.6.2", ()),
+        ("Log in to GHCR", "docker/login-action@v3", ()),
         (
             "Read chart appVersion (the tag a bare `helm install` resolves)",
             None,
@@ -302,7 +306,7 @@ PIPELINE_STEPS = {
         ),
         (
             "Push scanned image to GHCR (latest + commit SHA + chart appVersion)",
-            "docker/build-push-action",
+            "docker/build-push-action@v6",
             (),
         ),
     ),
@@ -398,7 +402,9 @@ def _conditional_gates(workflow: Dict[Any, Any]) -> List[Dict[str, Any]]:
 def _signature(step: Dict[str, Any]) -> Any:
     return (
         step.get("name"),
-        step.get("uses", "").split("@")[0] or None,
+        # The version too: the action name alone leaves a re-pointed or bumped
+        # ref free to change what the step does with the file untouched.
+        step.get("uses") or None,
         tuple(
             line.strip() for line in _uncommented(step.get("run", "")) if line.strip()
         ),
