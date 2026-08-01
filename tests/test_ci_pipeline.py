@@ -1,10 +1,10 @@
 """The CI gates the README advertises must exist in the pipeline definition.
 
-These read the workflow file; they do not run it. What they can establish is
-that each gate is present, that its command is exactly what it claims to be, and
-that nothing in the file reduces what it examines. What no reading of the file
-can establish is that the runner behaved — only the pipeline executing does
-that, which is why the deploy-posture file makes the same trade.
+These read the workflow file; they do not run it. What they establish is that
+the file describes exactly the steps below and no others. What no reading of the
+file can establish is that the runner behaved, or that the tools those steps
+invoke behave as their names suggest — only the pipeline executing does that,
+which is why the deploy-posture file makes the same trade.
 """
 
 from __future__ import annotations
@@ -35,29 +35,6 @@ def _ci() -> Dict[Any, Any]:
 
 def _runs(job: Dict[str, Any]) -> str:
     return "\n".join(step.get("run", "") for step in job.get("steps", []))
-
-
-def test_ci_enforces_the_coverage_floor() -> None:
-    """A floor that is not in the test command is a number in a document; the
-    gate must be able to fail the build when covered code loses its tests."""
-    test_job = _runs(_ci()["jobs"]["test"])
-    assert "--cov=app" in test_job, "the test job never measures coverage"
-    assert "--cov-fail-under=85" in test_job, (
-        "the test job measures coverage but no floor can fail the build"
-    )
-
-
-def test_ci_audits_the_python_dependencies() -> None:
-    """Trivy scans the built image's installed libraries; nothing audits the
-    source tree's dependency set on pull requests, where a vulnerable pin
-    should be caught before an image is ever built."""
-    everything = "\n".join(_runs(job) for job in _ci()["jobs"].values())
-    # An invocation line, not a mention: `pip install pip-audit` alone would
-    # download the auditor and never run it.
-    lines = [line.strip() for line in everything.splitlines()]
-    assert any(
-        line == "pip-audit" or line.startswith("pip-audit ") for line in lines
-    ), "no run line invokes pip-audit"
 
 
 def _top_level(listing: str) -> set[str]:
@@ -214,32 +191,106 @@ ADVERTISED_COMMANDS = (
     "helm template",
     PROVE_SEMANTIC,
 )
-# What each gate step runs, line for line. Asking whether a command APPEARS
-# admits every way of having it present and inert: quoted in a comment, echoed,
-# fenced in a heredoc, or followed by an excuse like `|| true`. These bodies are
-# ours, so they are a closed set and can be pinned rather than searched.
-GATE_RUNS = {
-    "Lint": ("ruff check .",),
-    "Format check": ("ruff format --check .",),
-    "Type-check": ("mypy app evals scripts tests",),
-    "Audit Python dependencies (pip-audit)": (
-        "pip install pip-audit -c constraints-dev.txt",
-        "pip-audit",
+# Every step this pipeline runs, in order, by job: its name, the action it uses,
+# and the lines it executes. Pinning the gate bodies left the STEP LIST open,
+# and a step that adds nothing to a gate can still take one away — a shim
+# earlier on PATH, an exclusion appended to pyproject, a variable exported into
+# every later step. The steps are ours, so this set is closed too.
+PIPELINE_STEPS = {
+    "test": (
+        (None, "actions/checkout", ()),
+        (None, "actions/setup-python", ()),
+        (None, None, ("python -m pip install --upgrade pip",)),
+        (
+            "Install (pulls rag-llm-infra from PyPI; dev toolchain pinned)",
+            None,
+            ('pip install -e ".[dev]" -c constraints-dev.txt',),
+        ),
+        ("Lint", None, ("ruff check .",)),
+        ("Format check", None, ("ruff format --check .",)),
+        ("Type-check", None, ("mypy app evals scripts tests",)),
+        (
+            "Audit Python dependencies (pip-audit)",
+            None,
+            ("pip install pip-audit -c constraints-dev.txt", "pip-audit"),
+        ),
+        (
+            "Integration tests (coverage floor enforced)",
+            None,
+            ("pytest -q --cov=app --cov-fail-under=85",),
+        ),
+        (
+            "Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)",
+            None,
+            ("python -m evals",),
+        ),
     ),
-    "Integration tests (coverage floor enforced)": (
-        "pytest -q --cov=app --cov-fail-under=85",
+    "semantic": (
+        (None, "actions/checkout", ()),
+        (None, "actions/setup-python", ()),
+        ("Cache the embedding model", "actions/cache", ()),
+        (None, None, ("python -m pip install --upgrade pip",)),
+        (
+            "Install with the semantic extra",
+            None,
+            ('pip install -e ".[dev,semantic]" -c constraints-dev.txt',),
+        ),
+        (
+            "Paraphrase floor + floor-derivation reproduce (semantic-marked gates)",
+            None,
+            ("python scripts/check_semantic_report.py",),
+        ),
     ),
-    "Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)": (
-        "python -m evals",
+    "iac": (
+        (None, "actions/checkout", ()),
+        (None, "azure/setup-helm", ()),
+        (
+            "Helm lint + render",
+            None,
+            ("helm lint deploy/helm", "helm template release deploy/helm > /dev/null"),
+        ),
+        ("Lint Dockerfile (hadolint)", "hadolint/hadolint-action", ()),
     ),
-    "Paraphrase floor + floor-derivation reproduce (semantic-marked gates)": (
-        PROVE_SEMANTIC,
-    ),
-    "Helm lint + render": (
-        "helm lint deploy/helm",
-        "helm template release deploy/helm > /dev/null",
+    "docker": (
+        (None, "actions/checkout", ()),
+        ("Set up Buildx", "docker/setup-buildx-action", ()),
+        ("Build image (load locally for scan + SBOM)", "docker/build-push-action", ()),
+        (
+            "Trivy image scan (fail on fixable HIGH/CRITICAL)",
+            "aquasecurity/trivy-action",
+            (),
+        ),
+        ("Generate CycloneDX SBOM", "anchore/sbom-action", ()),
+        ("Upload SBOM artifact", "actions/upload-artifact", ()),
+        ("Log in to GHCR", "docker/login-action", ()),
+        (
+            "Read chart appVersion (the tag a bare `helm install` resolves)",
+            None,
+            (
+                "v=\"$(awk -F'\"' '/^appVersion:/ {print $2}' deploy/helm/Chart.yaml)\"",
+                'test -n "$v"  # fail loudly rather than pushing a malformed empty tag',
+                'echo "app_version=$v" >> "$GITHUB_OUTPUT"',
+            ),
+        ),
+        (
+            "Push scanned image to GHCR (latest + commit SHA + chart appVersion)",
+            "docker/build-push-action",
+            (),
+        ),
     ),
 }
+
+# The steps the README sells as gates. What each one runs is pinned above.
+ADVERTISED_STEPS = (
+    "Lint",
+    "Format check",
+    "Type-check",
+    "Audit Python dependencies (pip-audit)",
+    "Integration tests (coverage floor enforced)",
+    "Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)",
+    "Paraphrase floor + floor-derivation reproduce (semantic-marked gates)",
+    "Helm lint + render",
+)
 
 # Every input every action may carry. Restricting only the scanners left the
 # builder free to publish a different stage, and checkout free to fetch a
@@ -316,18 +367,38 @@ def _conditional_gates(workflow: Dict[Any, Any]) -> List[Dict[str, Any]]:
     return [s for s in _steps(workflow) if s.get("if") and _advertised(s)]
 
 
-def test_every_command_the_readme_advertises_runs_in_the_pipeline() -> None:
-    """Each is sold as a gate. Presence is not the property — a command can be
-    echoed, fenced in a heredoc or excused with `|| true` and still be there —
-    so each gate step's body has to be exactly what it is supposed to run."""
-    named = {step.get("name"): step for step in _steps(_ci())}
-    for name, expected in GATE_RUNS.items():
-        step = named.get(name)
-        assert step, f"the {name} step is gone"
-        body = tuple(
+def _signature(step: Dict[str, Any]) -> Any:
+    return (
+        step.get("name"),
+        step.get("uses", "").split("@")[0] or None,
+        tuple(
             line.strip() for line in _uncommented(step.get("run", "")) if line.strip()
-        )
-        assert body == expected, (name, body)
+        ),
+    )
+
+
+def test_the_pipeline_runs_these_steps_and_no_others() -> None:
+    """Pinning what the gates run leaves what runs BESIDE them open, and a step
+    that touches no gate can still disarm one: a shim earlier on PATH, an
+    exclusion appended to the config a gate reads, a variable exported into
+    every later step. Nothing is subtracted in any of those, so every check
+    that asks what a gate says still passes. The steps are ours; this is all
+    of them."""
+    actual = {
+        job: tuple(_signature(step) for step in body["steps"])
+        for job, body in _ci()["jobs"].items()
+    }
+    assert actual == PIPELINE_STEPS
+
+
+def test_every_step_the_readme_sells_as_a_gate_is_one_of_them() -> None:
+    """The pinned list above is what runs; this is which of it the README sells
+    — and a name occurring twice would make the pinning ambiguous."""
+    pinned = [step for steps in PIPELINE_STEPS.values() for step in steps]
+    names = [name for name, _, _ in pinned if name]
+    assert len(names) == len(set(names)), sorted(names)
+    for advertised in ADVERTISED_STEPS:
+        assert advertised in names, advertised
 
 
 def test_every_action_the_readme_advertises_is_present_and_can_fail() -> None:
