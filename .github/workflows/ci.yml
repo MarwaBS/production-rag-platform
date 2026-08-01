@@ -34,8 +34,11 @@ jobs:
         run: |
           pip install pip-audit -c constraints-dev.txt
           pip-audit
-      - name: Integration tests (coverage floor enforced)
-        run: pytest -q --cov=app --cov-fail-under=85
+      - name: Integration tests (every tracked test proven to have run; coverage floor enforced)
+        # This step IS the test run. A conftest that marks items skipped leaves
+        # them collected and the run green, so the checker starts the run and
+        # requires the report it wrote to account for every test in the source.
+        run: python -m scripts.check_suite_report
       - name: Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)
         run: python -m evals
 
@@ -58,7 +61,7 @@ jobs:
         # This step IS the test run. The checker starts it and reads the report
         # that run wrote, because neither an exit status nor a report handed to
         # a separate step can show which gates actually executed.
-        run: python scripts/check_semantic_report.py
+        run: python -m scripts.check_semantic_report
 
   iac:
     runs-on: ubuntu-latest

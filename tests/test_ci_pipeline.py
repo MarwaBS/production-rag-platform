@@ -23,7 +23,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # The whole run line, not a substring of it. `: python scripts/...` contains the
 # substring and executes nothing; the checker takes no argument so that the
 # assertion below can be an equality rather than a search.
-PROVE_SEMANTIC = "python scripts/check_semantic_report.py"
+PROVE_SEMANTIC = "python -m scripts.check_semantic_report"
+PROVE_SUITE = "python -m scripts.check_suite_report"
 
 
 def _ci() -> Dict[Any, Any]:
@@ -238,6 +239,7 @@ def test_ci_gates_the_paraphrase_eval_under_the_semantic_backend() -> None:
         runs = [step.get("run", "").strip() for step in job["steps"]]
         assert PROVE_SEMANTIC in runs, runs
     assert (ROOT / "scripts" / "check_semantic_report.py").exists()
+    assert (ROOT / "scripts" / "check_suite_report.py").exists()
     assert "semantic" in jobs["docker"].get("needs", []), (
         "the image publish does not wait for the semantic gate"
     )
@@ -262,7 +264,9 @@ ADVERTISED_COMMANDS = (
     "ruff format --check .",
     "mypy ",
     "pip-audit",
-    "--cov-fail-under=85",
+    # The coverage floor moved into the checker below with the run it fails on,
+    # and is pinned where it now lives.
+    PROVE_SUITE,
     "python -m evals",
     "helm lint",
     "helm template",
@@ -292,9 +296,9 @@ PIPELINE_STEPS = {
             ("pip install pip-audit -c constraints-dev.txt", "pip-audit"),
         ),
         (
-            "Integration tests (coverage floor enforced)",
+            "Integration tests (every tracked test proven to have run; coverage floor enforced)",
             None,
-            ("pytest -q --cov=app --cov-fail-under=85",),
+            (PROVE_SUITE,),
         ),
         (
             "Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)",
@@ -315,7 +319,7 @@ PIPELINE_STEPS = {
         (
             "Paraphrase floor + floor-derivation reproduce (semantic-marked gates)",
             None,
-            ("python scripts/check_semantic_report.py",),
+            (PROVE_SEMANTIC,),
         ),
     ),
     "iac": (
@@ -367,7 +371,7 @@ ADVERTISED_STEPS = (
     "Format check",
     "Type-check",
     "Audit Python dependencies (pip-audit)",
-    "Integration tests (coverage floor enforced)",
+    "Integration tests (every tracked test proven to have run; coverage floor enforced)",
     "Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)",
     "Paraphrase floor + floor-derivation reproduce (semantic-marked gates)",
     "Helm lint + render",
@@ -598,23 +602,32 @@ def _case(name: str, outcome: str = "") -> str:
     return f'<testcase classname="{module}" name="{bare}">{body}</testcase>'
 
 
+def _collected(*selection: str) -> set[str]:
+    """What pytest itself says it would run, keyed as a report keys it."""
+    listing = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", *selection],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
+    )
+    assert listing.returncode == 0, listing.stdout[-400:]
+    return {
+        line.strip()
+        .replace(chr(92), "/")
+        .split("[")[0]
+        .replace("/", ".")
+        .replace(".py::", "::")
+        for line in listing.stdout.splitlines()
+        if "::" in line
+    }
+
+
 def test_the_report_check_covers_every_semantic_gate_in_the_suite() -> None:
     """pytest is the authority on which tests carry the marker, so ask it rather
     than a second copy of the same guess: a gate added later must be covered."""
     from scripts.check_semantic_report import required_tests
 
-    collected = subprocess.run(
-        [sys.executable, "-m", "pytest", "-m", "semantic", "--collect-only", "-q"],
-        capture_output=True,
-        text=True,
-        cwd=str(ROOT),
-    )
-    assert collected.returncode == 0, collected.stdout[-400:]
-    marked = {
-        line.strip().replace("/", ".").replace(".py::", "::")
-        for line in collected.stdout.splitlines()
-        if "::" in line
-    }
+    marked = _collected("-m", "semantic")
     assert marked, "pytest collected no marked gates to check against"
     assert required_tests() == marked
 
@@ -622,7 +635,7 @@ def test_the_report_check_covers_every_semantic_gate_in_the_suite() -> None:
 def test_a_report_missing_a_gate_is_not_evidence_that_it_ran() -> None:
     """Collect-only, deselect, a swallowed exit status: each ends in a report
     that cannot account for one of the tests the job claims to have run."""
-    from scripts.check_semantic_report import verify
+    from scripts.gate_report import verify
 
     required = {"tests.test_a::test_alpha", "tests.test_b::test_beta"}
     both = _case("tests.test_a::test_alpha") + _case("tests.test_b::test_beta")
@@ -645,7 +658,7 @@ def test_a_report_missing_a_gate_is_not_evidence_that_it_ran() -> None:
 def test_a_failed_gate_is_not_masked_by_a_same_named_test_elsewhere() -> None:
     """Two modules may each define a test of the same name. Keyed on the bare
     name, whichever the report lists last stands in for the other."""
-    from scripts.check_semantic_report import verify
+    from scripts.gate_report import verify
 
     required = {"tests.test_a::test_shared"}
     report = _report(
@@ -729,3 +742,68 @@ def test_the_checker_fails_the_build_when_the_gates_are_not_proven(
     assert "test_alpha" in str(failure.value.code)
     monkeypatch.setattr(checker, "check", list)
     checker.main()  # a proven run must not fail the build
+
+
+def test_the_suite_checker_requires_every_test_the_default_run_collects() -> None:
+    """The checker reads its required set out of the source, so a test written
+    in a form that reader does not recognise — inside a class, generated at
+    import — would be absent from both sides and prove itself. pytest is the
+    authority on what the run contains, so the two have to agree."""
+    from scripts.check_suite_report import required_tests
+
+    collected = _collected()
+    assert collected, "pytest collected nothing to check against"
+    assert required_tests() == collected
+
+
+def test_between_them_the_two_checkers_require_every_test_the_repo_defines() -> None:
+    """The suite checker subtracts the semantic gates because their own job
+    proves them. Subtracting a name neither job requires would retire it."""
+    from scripts.check_semantic_report import required_tests as semantic
+    from scripts.check_suite_report import defined_tests, required_tests
+
+    assert semantic(), "fixture: no semantic gate to subtract"
+    assert required_tests() | semantic() == defined_tests()
+    assert required_tests() & semantic() == set()
+
+
+def test_a_parameter_set_is_proven_only_when_every_case_in_it_passed() -> None:
+    """Parameter sets share one name in the source and appear once per case in
+    the report. Matching the first case found lets the rest fail unnoticed."""
+    from scripts.gate_report import verify
+
+    required = {"tests.test_a::test_alpha"}
+    passed = _case("tests.test_a::test_alpha[0]") + _case("tests.test_a::test_alpha[1]")
+    assert verify(_report(passed), required) == []
+    one_bad = _case("tests.test_a::test_alpha[0]") + _case(
+        "tests.test_a::test_alpha[1]", "failure"
+    )
+    assert verify(_report(one_bad), required) == ["tests.test_a::test_alpha: failure"]
+
+
+def test_a_run_that_passed_every_test_and_still_exited_nonzero_is_not_proven() -> None:
+    """The coverage floor fails the run without failing a test: every case in
+    the report passed and pytest exits one. The report alone calls that proven."""
+    from scripts.check_suite_report import check, required_tests
+
+    def runner(argv: List[str], cwd: str) -> int:
+        _junitxml(argv).write_text(
+            _report("".join(_case(name) for name in required_tests())), encoding="utf-8"
+        )
+        return 1
+
+    assert check(runner=runner) == ["pytest exited 1"]
+
+
+def test_the_suite_checker_runs_the_whole_suite_under_the_coverage_floor() -> None:
+    """The command is the only part of the run the checker chooses. Selecting a
+    marker narrows it; dropping the floor leaves the coverage claim ungated."""
+    from scripts.check_suite_report import _pytest_command
+
+    report = pathlib.Path("somewhere") / "report.xml"
+    argv = _pytest_command(report)
+    assert argv[0] == sys.executable and argv[2] == "pytest", argv
+    options = argv[3:]
+    assert "--cov=app" in options and "--cov-fail-under=85" in options, argv
+    assert f"--junitxml={report}" in options, argv
+    assert "-m" not in options, argv
