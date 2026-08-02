@@ -268,33 +268,30 @@ def test_a_file_whose_content_left_the_index_stops_the_run(
 
 
 def test_a_filter_between_a_file_and_its_hash_stops_the_run(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Hashing applies whatever the repo has been told to apply, so a filter
-    would sit between a file and the hash it is compared to. Both sources that
-    can select one live outside the tree: an attributes file under the git
-    directory, and one named in config. A tracked .gitattributes is not in the
-    manifest, so it is refused already."""
+    would sit between a file and the hash it is compared to. An attribute can
+    select one from four places, two of them outside the repository as well as
+    outside the tree, so git is asked which files carry one rather than the
+    places an answer could have come from."""
     from scripts import gate_report
 
-    monkeypatch.setattr(gate_report, "REPO", tmp_path)
-    monkeypatch.setattr(gate_report, "MANIFEST", frozenset())
-    monkeypatch.setattr(gate_report, "tracked_files", set)
-    monkeypatch.setattr(gate_report, "_git", lambda *a, **k: "")
-    assert not [p for p in gate_report.unaccepted_tree() if "filter" in p]
-
-    (tmp_path / ".git" / "info").mkdir(parents=True)
-    (tmp_path / ".git" / "info" / "attributes").write_text("", encoding="utf-8")
-    assert ".git/info/attributes: it can put a filter between a file and its hash" in (
-        gate_report.unaccepted_tree()
+    monkeypatch.setattr(gate_report, "tracked_files", lambda: {"a.py", "b.py"})
+    unspecified = "\0".join(
+        ["a.py", "filter", "unspecified", "b.py", "filter", "unspecified"]
     )
+    monkeypatch.setattr(gate_report, "_git", lambda *a, **k: unspecified)
+    assert gate_report._filtered() == []
 
-    monkeypatch.setattr(
-        gate_report,
-        "_git",
-        lambda *a, **k: "~/.gitattributes" if a[:2] == ("config", "--get") else "",
-    )
-    assert "core.attributesFile: it can put a filter between a file and its hash" in (
+    selected = "\0".join(["a.py", "filter", "zap", "b.py", "filter", "unspecified"])
+    monkeypatch.setattr(gate_report, "_git", lambda *a, **k: selected)
+    assert gate_report._filtered() == ["a.py"]
+
+    # And that the reading is wired into what refuses a run, not just readable.
+    monkeypatch.setattr(gate_report, "_filtered", lambda: ["a.py"])
+    monkeypatch.setattr(gate_report, "_changed_since_the_index", list)
+    assert "a.py: a filter stands between it and the hash it is compared to" in (
         gate_report.unaccepted_tree()
     )
 
@@ -437,8 +434,10 @@ def test_a_startup_module_stops_the_run_before_a_command_is_read(
     from scripts import gate_report
 
     monkeypatch.setattr(gate_report, "_STARTUP_MODULES", ("os",))
-    assert "os: importable, and imported before any command is read" in (
-        gate_report.unaccepted_tree()
+    # The message names where it was found, so a refusal is diagnosable.
+    assert any(
+        problem.startswith("os: importable from ")
+        for problem in gate_report.unaccepted_tree()
     )
 
 

@@ -37,8 +37,8 @@ def _hash_embed(texts: List[str]) -> np.ndarray:
 
 
 def _semantic_embed(texts: List[str]) -> np.ndarray:
-    # Lazy and cached: the model costs seconds and ~90MB; boot already
-    # verified the package exists when this backend is selected.
+    # Lazy and cached: the model costs seconds and ~90MB. Reached through
+    # app.main, boot has already verified the package this needs.
     global _semantic_model
     if _semantic_model is None:
         from sentence_transformers import SentenceTransformer

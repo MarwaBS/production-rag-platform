@@ -7,11 +7,9 @@ that ran nothing, and copied into place. So a check built on this starts the run
 itself, into a directory it creates outside the tree, and reads back only what
 that run wrote there.
 
-Which leaves what the run can do to that report, since it is handed the path it
-writes and the status it exits on. So what is named here is not the ways in but
-the other side: a run begins only from the files the repo carries, the settings
-it is given and the variables it starts with, which leaves the code the tests
-import — the thing under review.
+A run begins only from the files the repo carries, the settings it is given and
+the variables it starts with, which leaves the code the tests import — the thing
+under review.
 """
 
 from __future__ import annotations
@@ -121,6 +119,7 @@ PYTEST_CONFIG = {
 # Built, not filtered: a variable that survives is one somebody read. PATH
 # resolves the git every reading runs, TEMP and TMP decide where the report is
 # written, four resolve the home holding the cached model, three start a shell.
+# Ten names, and the list holds ten.
 _INHERITED = (
     "PATH",
     "SYSTEMROOT",
@@ -132,8 +131,6 @@ _INHERITED = (
     "USERPROFILE",
     "HOMEDRIVE",
     "HOMEPATH",
-    "APPDATA",
-    "LOCALAPPDATA",
 )
 _IMPOSED = {
     # Entry points are how an installed distribution loads itself into a run.
@@ -184,6 +181,28 @@ def _git(*arguments: str, stdin: str = "") -> str:
     ).stdout
 
 
+def _filtered() -> List[str]:
+    """Tracked files a filter would be applied to when they are hashed.
+
+    Asked of git rather than of the places an attribute can be written: there
+    are four, two of them outside both the tree and the repository, and naming
+    them is how the last three attempts at this were walked around."""
+    names = sorted(tracked_files())
+    if not names:
+        return []
+    answer = _git(
+        "check-attr", "--stdin", "-z", "filter", stdin="\0".join(names) + "\0"
+    ).split("\0")
+    # Triples of path, attribute, value; anything but unspecified is a filter.
+    return sorted(
+        {
+            answer[start]
+            for start in range(0, len(answer) - 2, 3)
+            if answer[start + 2] != "unspecified"
+        }
+    )
+
+
 def _changed_since_the_index() -> List[str]:
     """Tracked files whose content differs from what the index records.
 
@@ -192,13 +211,20 @@ def _changed_since_the_index() -> List[str]:
     recorded = {}
     for line in _git("ls-files", "-s").splitlines():
         details, _, name = line.partition("\t")
-        recorded[name] = details.split()[1]
+        fields = details.split()
+        if not name or len(fields) < 2:
+            return [f"the index listing is not what it should be: {line[:40]!r}"]
+        recorded[name] = fields[1]
     names = sorted(recorded)
     if not names:
         return []
     # Hashed the way the index was written, line endings and all. What could
     # stand between the two is a clean filter, refused rather than bypassed.
     hashed = _git("hash-object", "--stdin-paths", stdin="\n".join(names)).split()
+    if len(hashed) != len(names):
+        # Pairing a short list against a long one compares a file to another
+        # file's hash, which reads as a difference where there is none.
+        return [f"{len(names)} files listed and {len(hashed)} hashed"]
     return [name for name, digest in zip(names, hashed) if digest != recorded[name]]
 
 
@@ -287,17 +313,9 @@ def unaccepted_tree() -> List[str]:
         for line in _git("ls-files", "-v").splitlines()
         if line and line[0] != "H"
     ]
-    # A clean filter stands between a file and its hash, and both the attribute
-    # naming one and the config defining it are untracked and never cloned.
     problems += [
-        f"{source}: it can put a filter between a file and its hash"
-        for source in (".git/info/attributes",)
-        if (REPO / source).exists()
-    ]
-    problems += [
-        "core.attributesFile: it can put a filter between a file and its hash"
-        for line in [_git("config", "--get", "core.attributesFile")]
-        if line.strip()
+        f"{name}: a filter stands between it and the hash it is compared to"
+        for name in _filtered()
     ]
     problems += [
         f"{name}: its content is not what the index records"
@@ -317,9 +335,10 @@ def unaccepted_tree() -> List[str]:
         f"{name}: in the tree and not carried" for name in files if name not in tracked
     ]
     problems += [
-        f"{name}: importable, and imported before any command is read"
+        f"{name}: importable from {found.origin}, and imported before any command"
         for name in _STARTUP_MODULES
-        if importlib.util.find_spec(name) is not None
+        for found in [importlib.util.find_spec(name)]
+        if found is not None
     ]
     # Bytecode whose header matches the source is loaded instead of it, and
     # carries whatever it was compiled from. The run is pointed at a cache
