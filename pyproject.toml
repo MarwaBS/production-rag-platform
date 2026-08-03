@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "Deployable reference RAG service built on the rag-llm-infra package: typed config, structured logging, Prometheus metrics, health/readiness probes, and an index/query API."
 readme = "README.md"
 # 3.12 is the only version anything here is held to: the image, CI, the badge,
-# ruff's target and mypy's python_version all say 3.12, and nothing runs a older
+# ruff's target and mypy's python_version all say 3.12, and nothing runs an older
 # interpreter, so a wider floor would be a claim no gate stands behind.
 requires-python = ">=3.12"
 license = "MIT"

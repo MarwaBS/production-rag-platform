@@ -98,8 +98,10 @@ def _route_uvicorn_logs_through_json() -> None:
     """Send uvicorn's own records to the root JSON handler under ENV=prod.
 
     rag-llm-infra installs its JSON formatter on the root logger, keyed on
-    ENV=prod. uvicorn keeps plain-text handlers on its three loggers with
-    ``propagate=False``, so without this prod stdout is a mix of both formats.
+    ENV=prod. uvicorn puts plain-text handlers on `uvicorn` and `uvicorn.access`
+    with ``propagate=False``; `uvicorn.error` carries no handler and propagates
+    into the first of those, where it stops. So none of the three reaches the
+    root handler, and prod stdout is a mix of both formats.
     """
     if os.getenv("ENV", "dev").lower() != "prod":
         return

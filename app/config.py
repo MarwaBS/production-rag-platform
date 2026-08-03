@@ -8,10 +8,14 @@ surfacing as a confusing error deep inside a request.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import Field, StringConstraints, model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# What HTTP trims around a header value, so the comparison in app.main sees the
+# same bytes the client's header does.
+_HEADER_SPACE = " \t\r\n"
 
 
 class Settings(BaseSettings):
@@ -51,10 +55,27 @@ class Settings(BaseSettings):
     llm_breaker_failures: int = Field(default=3, ge=1)
     llm_breaker_reset_seconds: float = Field(default=30.0, gt=0)
     # When set, both /index and /query require a matching X-API-Key.
-    # Stripped: the value usually arrives from a Kubernetes Secret or a .env
-    # line, where a trailing newline or space is invisible and would make every
-    # request 401 against a key that looks correct in both places.
-    api_key: Annotated[str, StringConstraints(strip_whitespace=True)] = ""
+    api_key: str = ""
+
+    @model_validator(mode="after")
+    def _the_key_is_taken_without_the_space_around_it(self) -> Settings:
+        # The value arrives from a Secret or a .env line, where a trailing
+        # newline is invisible; compared raw it matches nothing a client can
+        # send, so every request 401s against a key correct in both places.
+        #
+        # Refused rather than stripped when there is nothing else to it: empty
+        # is how this field says "no auth configured", so stripping a key of
+        # only spaces down to empty would OPEN the data-plane instead of
+        # closing it. Only the four bytes HTTP itself trims around a header
+        # value are removed, so a key whose first character is some other
+        # space stays a different key from one without it.
+        if self.api_key and not self.api_key.strip(_HEADER_SPACE):
+            raise ValueError(
+                "APP_API_KEY is only whitespace: set a real key, or leave it "
+                "unset to run without authentication"
+            )
+        self.api_key = self.api_key.strip(_HEADER_SPACE)
+        return self
 
     @model_validator(mode="after")
     def _production_requires_an_api_key(self) -> Settings:

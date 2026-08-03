@@ -165,7 +165,9 @@ report that run wrote as having passed · `helm lint` + `helm template`
 render · `hadolint` on the Dockerfile · Docker image build · **Trivy** image scan · a **CycloneDX SBOM**
 that is generated, read back (a document listing no components fails the build) and uploaded as an
 artifact. The image publish waits on the test, semantic and IaC jobs together.
-On merge to `main` it also pushes the scanned image to GHCR.
+On merge to `main` it also pushes the image to GHCR. The publish is a **second build** from the same
+Dockerfile and context, gated on the scan passing but not tied to the scanned build by digest — so
+what is published is an image built from vetted inputs, not byte-for-byte the artefact Trivy read.
 
 The eval here is a *retrieval*-quality gate: the shipped Mock LLM makes generation a fixed template, so
 answer quality is not something this repo can measure.

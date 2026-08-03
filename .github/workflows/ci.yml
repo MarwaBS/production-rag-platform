@@ -145,7 +145,7 @@ jobs:
           v="$(awk -F'"' '/^appVersion:/ {print $2}' deploy/helm/Chart.yaml)"
           test -n "$v"  # fail loudly rather than pushing a malformed empty tag
           echo "app_version=$v" >> "$GITHUB_OUTPUT"
-      - name: Push scanned image to GHCR (latest + commit SHA + chart appVersion)
+      - name: Push image to GHCR (latest + commit SHA + chart appVersion)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:

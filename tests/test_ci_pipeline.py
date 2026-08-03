@@ -552,7 +552,7 @@ PIPELINE_STEPS = {
             ),
         ),
         (
-            "Push scanned image to GHCR (latest + commit SHA + chart appVersion)",
+            "Push image to GHCR (latest + commit SHA + chart appVersion)",
             "docker/build-push-action@v6",
             (),
         ),

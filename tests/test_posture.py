@@ -39,11 +39,22 @@ def test_the_key_is_taken_without_the_whitespace_around_it(supplied: str) -> Non
     assert Settings(env="development", api_key=supplied).api_key == "a-key"
 
 
-def test_a_key_of_only_whitespace_cannot_pass_for_a_configured_one() -> None:
-    """It is empty once stripped, so production must refuse it exactly as it
-    refuses an unset one rather than booting an open data-plane."""
+@pytest.mark.parametrize("env", ["development", "staging", "production"])
+def test_a_key_of_only_whitespace_is_refused_in_every_environment(
+    env: Literal["development", "staging", "production"],
+) -> None:
+    """Empty is how this field says no auth is configured, so a key stripped
+    down to empty would leave /index and /query open to anyone who can reach
+    the pod. Every environment refuses it: the two that do not require a key at
+    all are exactly the ones where an accidental blank would not be noticed."""
     with pytest.raises(Exception, match="API_KEY"):
-        Settings(env="production", api_key="   \n")
+        Settings(env=env, api_key="   \n")
+
+
+def test_a_space_that_is_not_a_header_space_stays_part_of_the_key() -> None:
+    """Only what HTTP itself trims is removed. Stripping every unicode space
+    would make two distinct configured keys the same key."""
+    assert Settings(env="development", api_key="\xa0secret").api_key == "\xa0secret"
 
 
 def test_production_does_not_serve_the_interactive_docs() -> None:

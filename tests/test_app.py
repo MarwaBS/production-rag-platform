@@ -72,10 +72,9 @@ def test_query_before_index_returns_409() -> None:
 
 
 def test_query_409_path_is_observed_in_latency_histogram() -> None:
-    """Regression: latency was observed only on the success tail, so the 409
-    "not indexed" path (and errors) never entered the histogram, understating
-    real latency. The observe() now runs in a finally, so a 409 must bump the
-    histogram's count."""
+    """Every exit path is timed, not just the success tail: a histogram that
+    excludes the 409 and error paths understates latency and hides a slow
+    failure mode."""
     from prometheus_client import REGISTRY
 
     def _count() -> float:
@@ -174,9 +173,9 @@ def test_concurrent_reindex_and_query_never_5xx() -> None:
 
 
 def test_deployment_app_env_values_are_valid() -> None:
-    """Guard config/deployment drift: every APP_ENV the deploy files set must be
-    a valid Settings.env value. A 'dev' typo in docker-compose.yml used to crash
-    the service at import once env became a Literal."""
+    """Every APP_ENV the deploy files set must be a valid Settings.env value:
+    env is a Literal, so a typo in one of them is an import-time crash in the
+    deployed pod rather than a warning anywhere."""
     import pathlib
     import re
 
@@ -365,10 +364,9 @@ def test_api_key_comparison_is_constant_time() -> None:
 
 
 def test_startup_emits_structured_config_summary(caplog) -> None:
-    """Regression: the service used to ship ZERO log statements, so the
-    'structured logs' claim was inert. Startup must emit a config summary
-    through the app logger (JSON-formatted when the process runs with
-    ENV=prod, as the Helm deploy does)."""
+    """Startup emits a config summary through the app logger, which is what
+    makes the structured-logging claim answerable: without a single log
+    statement the claim is about a formatter nothing reaches."""
     import logging
 
     with caplog.at_level(logging.INFO, logger="app.main"):
@@ -556,11 +554,10 @@ def test_default_helm_ingress_is_disabled() -> None:
 
 
 def test_helm_deploy_activates_json_logging() -> None:
-    """Regression: rag-llm-infra keys its JSON log formatter on ENV=prod, but
-    the chart used to set only APP_ENV=production (and the template hardcoded
-    that single key) — so 'structured JSON logs' never activated in the shipped
-    deploy. The values must carry both knobs and the template must render every
-    key under .Values.env."""
+    """rag-llm-infra keys its JSON formatter on ENV=prod, which is a different
+    knob from the app's own APP_ENV. The values must carry both, and the
+    template must render every key under .Values.env — setting only APP_ENV
+    leaves the shipped deploy emitting human-readable logs."""
     import pathlib
     import re
 
@@ -578,13 +575,10 @@ def test_helm_deploy_activates_json_logging() -> None:
 
 
 def test_uvicorn_loggers_emit_json_under_prod(monkeypatch) -> None:
-    """Regression: under ENV=prod the app logger emits single-line JSON, but
-    uvicorn keeps its OWN plain-text handlers on the uvicorn / uvicorn.access
-    loggers with propagate=False (and uvicorn.error's records bubble to
-    uvicorn's plain handler and stop there) — so ALL uvicorn.* lines stay plain
-    text while app lines are JSON. Prod stdout was therefore a MIX of formats,
-    which breaks log ingestion and contradicts the README's structured-logging
-    claim. Every uvicorn.* logger must emit through the root JSON handler."""
+    """Under ENV=prod every uvicorn.* logger must reach the root JSON handler.
+    uvicorn holds plain-text handlers on uvicorn and uvicorn.access with
+    propagate=False, and uvicorn.error propagates into the first of those and
+    stops, so without the reroute prod stdout mixes both formats."""
     import io
     import json
     import logging
@@ -679,10 +673,9 @@ def test_uvicorn_reroute_happens_at_import_not_only_lifespan() -> None:
 
 
 def test_auth_failure_increments_auth_counter_not_request_counter(monkeypatch) -> None:
-    """Regression: a rejected (401) request was invisible to metrics — only
-    authenticated/served requests bumped a counter. A bad key must bump the
-    dedicated rag_auth_failures_total counter and must NOT be counted as a
-    served request in rag_requests_total."""
+    """A 401 never reaches a route body, so it bumps its own counter rather
+    than the served-request one: counted as served it would overstate traffic,
+    counted nowhere it would hide a credential-stuffing spike."""
     from prometheus_client import REGISTRY
 
     monkeypatch.setattr(main.settings, "api_key", "s3cret")
