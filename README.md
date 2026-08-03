@@ -137,7 +137,7 @@ OpenTelemetry traces · slowapi rate limiting · semantic validation · PDF outp
 
 Full summaries in **[docs/decisions/](docs/decisions/)**:
 
-- **[ADR-001](docs/decisions/001-faiss-over-managed-vector-db.md)** — An in-process index over a managed vector DB (sub-ms search, zero standing infra), and what that costs: no persistence, no scale-out.
+- **[ADR-001](docs/decisions/001-faiss-over-managed-vector-db.md)** — An in-process index over a managed vector DB (no network hop, zero standing infra), and what that costs: no persistence, no scale-out.
 - **[ADR-002](docs/decisions/002-pre-grounding-over-post-filtering.md)** — Pre-grounding over post-filtering (prevention beats detection; clean audit trail). The post-generation check is _full system_ only.
 - **[ADR-003](docs/decisions/003-circuit-breaker-for-llm-resilience.md)** — Circuit breaker for LLM resilience (timeout, bounded retry, fail fast, self-heal) — implemented here, at single-replica scope.
 - **[ADR-004](docs/decisions/004-vendor-neutral-llm-protocol.md)** — Vendor-neutral LLM protocol (model vendor is a config choice; open-sourced in `rag-llm-infra`).
