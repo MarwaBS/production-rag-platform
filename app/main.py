@@ -102,6 +102,9 @@ def _route_uvicorn_logs_through_json() -> None:
     with ``propagate=False``; `uvicorn.error` carries no handler and propagates
     into the first of those, where it stops. So none of the three reaches the
     root handler, and prod stdout is a mix of both formats.
+
+    Limit: `uvicorn --log-config` replaces that config after this runs, and
+    nothing here detects it. The shipped CMD passes no such flag.
     """
     if os.getenv("ENV", "dev").lower() != "prod":
         return

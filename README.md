@@ -162,12 +162,15 @@ sentence-transformers extra and runs the paraphrase floors, which the default wo
 satisfy — that job's only test step is [`scripts/check_semantic_report.py`](scripts/check_semantic_report.py), which
 starts the run itself into a directory it creates and fails the build unless every semantic gate appears in the
 report that run wrote as having passed · `helm lint` + `helm template`
-render · `hadolint` on the Dockerfile · Docker image build · **Trivy** image scan · a **CycloneDX SBOM**
+render (defaults **and** every opt-in template, so the ingress, TLS and monitoring manifests are
+rendered rather than shipped unseen) · `hadolint` on the Dockerfile · Docker image build · the built
+image **started, with `/health`, `/index` and `/query` exercised against it**, so a broken `CMD` or a
+missing runtime dependency fails here instead of shipping · **Trivy** image scan · a **CycloneDX SBOM**
 that is generated, read back (a document listing no components fails the build) and uploaded as an
 artifact. The image publish waits on the test, semantic and IaC jobs together.
-On merge to `main` it also pushes the image to GHCR. The publish is a **second build** from the same
-Dockerfile and context, gated on the scan passing but not tied to the scanned build by digest — so
-what is published is an image built from vetted inputs, not byte-for-byte the artefact Trivy read.
+On merge to `main` it pushes **the scanned image itself** to GHCR — the local image Trivy read and the
+SBOM described, re-tagged and pushed, with the image id compared against the scanned one before each
+push. Nothing is rebuilt for the publish, so the bytes served are the bytes vetted.
 
 The eval here is a *retrieval*-quality gate: the shipped Mock LLM makes generation a fixed template, so
 answer quality is not something this repo can measure.

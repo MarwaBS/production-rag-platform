@@ -453,6 +453,7 @@ ADVERTISED_COMMANDS = (
     "python -m evals",
     "helm lint",
     "helm template",
+    "docker run -d --name smoke",
     PROVE_SEMANTIC,
     # The SBOM is sold as a gate, so the step that reads the document back is
     # one: generating and uploading a file cannot fail on what the file says.
@@ -510,9 +511,18 @@ PIPELINE_STEPS = {
         (None, "actions/checkout@v4", ()),
         (None, "azure/setup-helm@v4", ()),
         (
-            "Helm lint + render",
+            "Helm lint + render (defaults, then every opt-in template)",
             None,
-            ("helm lint deploy/helm", "helm template release deploy/helm > /dev/null"),
+            (
+                "helm lint deploy/helm",
+                "helm template release deploy/helm > /dev/null",
+                "helm template release deploy/helm \\",
+                "--set ingress.enabled=true \\",
+                "--set ingress.tls.enabled=true \\",
+                "--set ingress.tls.clusterIssuer=letsencrypt-prod \\",
+                "--set monitoring.enabled=true \\",
+                "--set secrets.data.APP_API_KEY=c2VjcmV0 > /dev/null",
+            ),
         ),
         ("Lint Dockerfile (hadolint)", "hadolint/hadolint-action@v3.1.0", ()),
     ),
@@ -528,6 +538,24 @@ PIPELINE_STEPS = {
             "Trivy image scan (fail on fixable HIGH/CRITICAL)",
             "aquasecurity/trivy-action@v0.36.0",
             (),
+        ),
+        (
+            "Run the built image and exercise its API",
+            None,
+            (
+                'docker run -d --name smoke -p 8000:8000 "$IMAGE:ci"',
+                "for _ in $(seq 30); do",
+                "if curl -fsS localhost:8000/health > /dev/null; then serving=1; break; fi",
+                "sleep 1",
+                "done",
+                "docker logs smoke",
+                'test -n "${serving:-}"',
+                "curl -fsS -XPOST localhost:8000/index -H 'content-type: application/json' \\",
+                '-d \'{"documents":["a document the smoke test can retrieve"]}\'',
+                "curl -fsS -XPOST localhost:8000/query -H 'content-type: application/json' \\",
+                '-d \'{"query":"retrieve","k":1}\'',
+                "docker rm -f smoke",
+            ),
         ),
         ("Generate CycloneDX SBOM", "anchore/sbom-action@v0.24.0", ()),
         (
@@ -552,9 +580,16 @@ PIPELINE_STEPS = {
             ),
         ),
         (
-            "Push image to GHCR (latest + commit SHA + chart appVersion)",
-            "docker/build-push-action@v6",
-            (),
+            "Push the scanned image to GHCR (latest + commit SHA + chart appVersion)",
+            None,
+            (
+                'scanned="$(docker image inspect "$IMAGE:ci" --format \'{{.Id}}\')"',
+                'for tag in latest "$GITHUB_SHA" "${{ steps.chart.outputs.app_version }}"; do',
+                'docker tag "$IMAGE:ci" "$IMAGE:$tag"',
+                'test "$(docker image inspect "$IMAGE:$tag" --format \'{{.Id}}\')" = "$scanned"',
+                'docker push "$IMAGE:$tag"',
+                "done",
+            ),
         ),
     ),
 }
@@ -568,7 +603,7 @@ ADVERTISED_STEPS = (
     "Integration tests (the run has to account for every test it selects; coverage floor enforced)",
     "Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)",
     "Paraphrase floor + floor-derivation reproduce (semantic-marked gates)",
-    "Helm lint + render",
+    "Helm lint + render (defaults, then every opt-in template)",
     "Check the SBOM inventories the image",
 )
 
@@ -635,6 +670,10 @@ def _action(workflow: Dict[Any, Any], name: str) -> List[Dict[str, Any]]:
 def _uncommented(run: str) -> List[str]:
     """A gate quoted inside a shell comment is not a gate that runs."""
     return [line for line in run.splitlines() if not line.strip().startswith("#")]
+
+
+def _uncommented_text(run: str) -> str:
+    return chr(10).join(_uncommented(run))
 
 
 def _advertised(step: Dict[str, Any]) -> bool:
@@ -727,34 +766,44 @@ def test_every_action_the_readme_advertises_is_present_and_can_fail() -> None:
     assert scan["severity"] == "HIGH,CRITICAL", scan
     assert scan["vuln-type"] == "os,library", scan
     lint = _action(workflow, "hadolint/hadolint-action")[0]["with"]
-    assert lint["failure-threshold"] == "error", lint
+    # error alone admits every warning the linter has, which is most of them.
+    assert lint["failure-threshold"] == "warning", lint
     assert (ROOT / lint["dockerfile"]).is_file(), lint
 
 
 def test_what_gets_scanned_is_what_gets_built_and_what_gets_pushed() -> None:
-    """Comparing the two expressions is not comparing the two images: a
-    step-level env rebinds what they expand to, and the push is a second build
-    whose inputs were never tied to the one that was scanned."""
+    """One build, and the publish carries its tags rather than repeating it.
+    A second build cannot be tied to the first by comparing their inputs: equal
+    context and Dockerfile is not equal bytes, so the only way the published
+    image is the vetted one is for nothing to build it twice."""
     workflow = _ci()
-    loaded = [s for s in _steps(workflow) if (s.get("with") or {}).get("load")]
-    assert len(loaded) == 1, loaded
-    build = loaded[0]["with"]
-    assert _action(workflow, "aquasecurity/trivy-action")[0]["with"]["image-ref"] == (
-        build["tags"].strip()
+    builds = _action(workflow, "docker/build-push-action")
+    assert len(builds) == 1, [step.get("name") for step in builds]
+    build = builds[0]["with"]
+    assert build.get("load"), build
+    assert not build.get("push"), build
+    image = build["tags"].strip()
+    assert (
+        _action(workflow, "aquasecurity/trivy-action")[0]["with"]["image-ref"] == image
     )
-    assert _action(workflow, "anchore/sbom-action")[0]["with"]["image"] == (
-        build["tags"].strip()
-    )
-    published = [s for s in _steps(workflow) if (s.get("with") or {}).get("push")]
+    assert _action(workflow, "anchore/sbom-action")[0]["with"]["image"] == image
+
+    published = [
+        step
+        for step in _steps(workflow)
+        if "docker push" in _uncommented_text(step.get("run", ""))
+    ]
     assert len(published) == 1, published
-    for shared in ("context", "file"):
-        assert published[0]["with"][shared] == build[shared], shared
+    body = _uncommented_text(published[0]["run"])
+    # Pushed by re-tagging the local image the scan read, and the ids compared
+    # before each push: a `docker build` here would publish unvetted bytes.
+    assert "docker build" not in body, body
+    assert 'docker tag "$IMAGE:ci"' in body, body
+    assert "docker image inspect" in body and "{{.Id}}" in body, body
     # The chart's appVersion tag must be among them, or a bare `helm install`
     # resolves a tag that was never pushed.
-    tags = published[0]["with"]["tags"].split()
-    assert any("app_version" in tag for tag in tags), tags
-    assert any(tag.endswith(":latest") for tag in tags), tags
-    assert any("github.sha" in tag for tag in tags), tags
+    assert "app_version" in body, body
+    assert "latest" in body and "GITHUB_SHA" in body, body
 
 
 def test_the_sbom_that_is_uploaded_is_the_sbom_that_was_generated() -> None:

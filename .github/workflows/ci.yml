@@ -68,15 +68,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
-      - name: Helm lint + render
+      - name: Helm lint + render (defaults, then every opt-in template)
+        # Rendering defaults alone never reaches the ingress, TLS, ServiceMonitor
+        # or PrometheusRule templates, so a broken one ships unrendered.
         run: |
           helm lint deploy/helm
           helm template release deploy/helm > /dev/null
+          helm template release deploy/helm \
+            --set ingress.enabled=true \
+            --set ingress.tls.enabled=true \
+            --set ingress.tls.clusterIssuer=letsencrypt-prod \
+            --set monitoring.enabled=true \
+            --set secrets.data.APP_API_KEY=c2VjcmV0 > /dev/null
       - name: Lint Dockerfile (hadolint)
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: deploy/Dockerfile
-          failure-threshold: error
+          failure-threshold: warning
 
   docker:
     runs-on: ubuntu-latest
@@ -108,6 +116,23 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           vuln-type: os,library
+      - name: Run the built image and exercise its API
+        # Everything else reads the image without starting it, so a broken CMD,
+        # a missing runtime dependency or a non-executable entrypoint stays
+        # green through build, scan and publish.
+        run: |
+          docker run -d --name smoke -p 8000:8000 "$IMAGE:ci"
+          for _ in $(seq 30); do
+            if curl -fsS localhost:8000/health > /dev/null; then serving=1; break; fi
+            sleep 1
+          done
+          docker logs smoke
+          test -n "${serving:-}"
+          curl -fsS -XPOST localhost:8000/index -H 'content-type: application/json' \
+            -d '{"documents":["a document the smoke test can retrieve"]}'
+          curl -fsS -XPOST localhost:8000/query -H 'content-type: application/json' \
+            -d '{"query":"retrieve","k":1}'
+          docker rm -f smoke
       - name: Generate CycloneDX SBOM
         uses: anchore/sbom-action@v0.24.0
         with:
@@ -145,14 +170,15 @@ jobs:
           v="$(awk -F'"' '/^appVersion:/ {print $2}' deploy/helm/Chart.yaml)"
           test -n "$v"  # fail loudly rather than pushing a malformed empty tag
           echo "app_version=$v" >> "$GITHUB_OUTPUT"
-      - name: Push image to GHCR (latest + commit SHA + chart appVersion)
+      - name: Push the scanned image to GHCR (latest + commit SHA + chart appVersion)
+        # Tagged and pushed from the local image the scan and the SBOM read, so
+        # the bytes published are the bytes vetted. Building a second time here
+        # would publish an artefact nothing in this job ever inspected.
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:${{ github.sha }}
-            ${{ env.IMAGE }}:${{ steps.chart.outputs.app_version }}
+        run: |
+          scanned="$(docker image inspect "$IMAGE:ci" --format '{{.Id}}')"
+          for tag in latest "$GITHUB_SHA" "${{ steps.chart.outputs.app_version }}"; do
+            docker tag "$IMAGE:ci" "$IMAGE:$tag"
+            test "$(docker image inspect "$IMAGE:$tag" --format '{{.Id}}')" = "$scanned"
+            docker push "$IMAGE:$tag"
+          done

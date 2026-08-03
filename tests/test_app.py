@@ -500,7 +500,7 @@ def test_default_helm_image_tag_is_published_by_ci() -> None:
     The Deployment falls back to the chart's appVersion when image.tag is empty,
     so if CI publishes only :latest and :<sha> that default install references a
     tag GHCR does not have and the pod cannot pull. Both halves are read with
-    comments stripped, and the CI half is matched inside the pushed tag list —
+    comments stripped, and the CI half is matched inside the loop that pushes —
     a mention anywhere else in the file is not a push.
     """
     import pathlib
@@ -519,12 +519,14 @@ def test_default_helm_image_tag_is_published_by_ci() -> None:
     assert "deploy/helm/Chart.yaml" in ci, (
         "CI must read the appVersion from the chart itself"
     )
-    # (?:\n|$) so a tag block that ends the file is captured whole.
-    tag_lists = re.findall(
-        r"^\s*tags:\s*\|\n((?:[^\S\n]+\S.*(?:\n|$))+)", ci, flags=re.M
-    )
-    assert any("steps.chart.outputs.app_version" in block for block in tag_lists), (
-        "the appVersion must appear in a pushed tag list, not merely in the file"
+    # The tag set the push loop iterates, not a mention anywhere in the file.
+    pushed = re.search(r"^\s*for tag in (.+); do$", ci, flags=re.M)
+    assert pushed, "expected a loop naming the tags that get pushed"
+    tags = pushed.group(1)
+    for required in ("latest", "GITHUB_SHA", "steps.chart.outputs.app_version"):
+        assert required in tags, (required, tags)
+    assert re.search(r'^\s*docker push "\$IMAGE:\$tag"$', ci, flags=re.M), (
+        "the loop must push each tag it names"
     )
 
 
