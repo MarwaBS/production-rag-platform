@@ -72,9 +72,9 @@ def test_query_before_index_returns_409() -> None:
 
 
 def test_query_409_path_is_observed_in_latency_histogram() -> None:
-    """Every exit path is timed, not just the success tail: a histogram that
-    excludes the 409 and error paths understates latency and hides a slow
-    failure mode."""
+    """Observed in a finally, so the handler's 409 and error exits are timed
+    and not only its success tail, which would understate latency and hide a
+    slow failure. Rejections before the body (401, 413, 422) never reach it."""
     from prometheus_client import REGISTRY
 
     def _count() -> float:

@@ -13,8 +13,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# What HTTP trims around a header value, so the comparison in app.main sees the
-# same bytes the client's header does.
+# What HTTP itself trims around a header value.
 _HEADER_SPACE = " \t\r\n"
 
 
@@ -59,16 +58,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _the_key_is_taken_without_the_space_around_it(self) -> Settings:
-        # The value arrives from a Secret or a .env line, where a trailing
-        # newline is invisible; compared raw it matches nothing a client can
-        # send, so every request 401s against a key correct in both places.
-        #
-        # Refused rather than stripped when there is nothing else to it: empty
-        # is how this field says "no auth configured", so stripping a key of
-        # only spaces down to empty would OPEN the data-plane instead of
-        # closing it. Only the four bytes HTTP itself trims around a header
-        # value are removed, so a key whose first character is some other
-        # space stays a different key from one without it.
+        # An invisible trailing newline from a Secret 401s every request.
+        # Whitespace-only is refused rather than stripped: empty means "no auth
+        # configured", so stripping it would open the data-plane, not close it.
         if self.api_key and not self.api_key.strip(_HEADER_SPACE):
             raise ValueError(
                 "APP_API_KEY is only whitespace: set a real key, or leave it "

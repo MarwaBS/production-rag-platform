@@ -33,9 +33,8 @@ def test_non_production_environments_stay_open_for_the_local_run(
 
 @pytest.mark.parametrize("supplied", ["a-key\n", " a-key", "a-key\t", "\ra-key "])
 def test_the_key_is_taken_without_the_whitespace_around_it(supplied: str) -> None:
-    """A key reaching the process from a Secret or a .env line can carry a
-    trailing newline nobody can see. Compared raw, it matches nothing the client
-    can send, so every request 401s against a key correct in both places."""
+    """Compared raw, a key carrying an invisible newline matches nothing a
+    client can send, so every request 401s against a key correct in both."""
     assert Settings(env="development", api_key=supplied).api_key == "a-key"
 
 
@@ -43,11 +42,10 @@ def test_the_key_is_taken_without_the_whitespace_around_it(supplied: str) -> Non
 def test_a_key_of_only_whitespace_is_refused_in_every_environment(
     env: Literal["development", "staging", "production"],
 ) -> None:
-    """Empty is how this field says no auth is configured, so a key stripped
-    down to empty would leave /index and /query open to anyone who can reach
-    the pod. Every environment refuses it: the two that do not require a key at
-    all are exactly the ones where an accidental blank would not be noticed."""
-    with pytest.raises(Exception, match="API_KEY"):
+    """Stripped to empty it would read as no-auth-configured and open the
+    data-plane. Refused in all three: the two that need no key are exactly
+    where a blank goes unnoticed."""
+    with pytest.raises(Exception, match="only whitespace"):
         Settings(env=env, api_key="   \n")
 
 
