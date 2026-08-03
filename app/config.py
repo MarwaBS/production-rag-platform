@@ -59,12 +59,17 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _the_key_is_taken_without_the_space_around_it(self) -> Settings:
         # An invisible trailing newline from a Secret 401s every request.
-        # Whitespace-only is refused rather than stripped: empty means "no auth
-        # configured", so stripping it would open the data-plane, not close it.
-        if self.api_key and not self.api_key.strip(_HEADER_SPACE):
+        # A key with nothing visible in it is refused rather than stripped:
+        # empty means "no auth configured", so reducing one to empty would open
+        # the data-plane. Asked as "has a visible character", not as a list of
+        # the blanks anyone thought of — a pasted NBSP is as invisible as a tab.
+        if self.api_key and not any(
+            character.isprintable() and not character.isspace()
+            for character in self.api_key
+        ):
             raise ValueError(
-                "APP_API_KEY is only whitespace: set a real key, or leave it "
-                "unset to run without authentication"
+                "APP_API_KEY has no visible character: set a real key, or "
+                "leave it unset to run without authentication"
             )
         self.api_key = self.api_key.strip(_HEADER_SPACE)
         return self

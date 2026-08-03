@@ -169,8 +169,8 @@ missing runtime dependency fails here instead of shipping · **Trivy** image sca
 that is generated, read back (a document listing no components fails the build) and uploaded as an
 artifact. The image publish waits on the test, semantic and IaC jobs together.
 On merge to `main` it pushes **the scanned image itself** to GHCR — the local image Trivy read and the
-SBOM described, re-tagged and pushed, with the image id compared against the scanned one before each
-push. Nothing is rebuilt for the publish, so the bytes served are the bytes vetted.
+SBOM described, re-tagged and pushed. Nothing is rebuilt for the publish, so the bytes served are the
+bytes vetted.
 
 The eval here is a *retrieval*-quality gate: the shipped Mock LLM makes generation a fixed template, so
 answer quality is not something this repo can measure.

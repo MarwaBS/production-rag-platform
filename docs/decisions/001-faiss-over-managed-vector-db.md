@@ -16,10 +16,14 @@ managed vector database. NumPy is the default implementation; FAISS and Qdrant a
 with `APP_VECTOR_BACKEND` and their extras.
 
 ## Why
-At this corpus size, brute-force in-process search returns in sub-millisecond time with zero
-network hops and zero standing infrastructure. A managed vector DB would add latency, a
-monthly bill, and a service to monitor, for no quality gain at this scale. Keeping the choice
-behind a protocol means the backend is a configuration change rather than a rewrite.
+At this corpus size, brute-force in-process search costs zero network hops and zero standing
+infrastructure. A managed vector DB would add a round trip, a monthly bill, and a service to
+monitor, for no quality gain at this scale. Keeping the choice behind a protocol means the
+backend is a configuration change rather than a rewrite.
+
+No latency figure is claimed here, because nothing in this repo measures one. The numbers this
+repo does state — the chunk window, the eval floors, the scale curve — each carry a producer
+under `scripts/` and a committed artefact that a gate re-derives.
 
 ## Trade-off
 Three things follow from holding the index in the process, and all three are load-bearing:

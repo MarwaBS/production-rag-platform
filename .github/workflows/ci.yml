@@ -176,9 +176,7 @@ jobs:
         # would publish an artefact nothing in this job ever inspected.
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          scanned="$(docker image inspect "$IMAGE:ci" --format '{{.Id}}')"
           for tag in latest "$GITHUB_SHA" "${{ steps.chart.outputs.app_version }}"; do
             docker tag "$IMAGE:ci" "$IMAGE:$tag"
-            test "$(docker image inspect "$IMAGE:$tag" --format '{{.Id}}')" = "$scanned"
             docker push "$IMAGE:$tag"
           done

@@ -39,14 +39,25 @@ def test_the_key_is_taken_without_the_whitespace_around_it(supplied: str) -> Non
 
 
 @pytest.mark.parametrize("env", ["development", "staging", "production"])
-def test_a_key_of_only_whitespace_is_refused_in_every_environment(
-    env: Literal["development", "staging", "production"],
+@pytest.mark.parametrize(
+    "blank",
+    [
+        "   \n",  # the ASCII spaces HTTP itself trims
+        "\xa0",  # a pasted non-breaking space
+        "　",  # an ideographic space
+        " ",  # a figure space
+        "\x0b",  # a vertical tab
+        "\x00",  # a NUL, which no strip() treats as whitespace
+    ],
+)
+def test_a_key_with_nothing_visible_in_it_is_refused_everywhere(
+    env: Literal["development", "staging", "production"], blank: str
 ) -> None:
-    """Stripped to empty it would read as no-auth-configured and open the
-    data-plane. Refused in all three: the two that need no key are exactly
-    where a blank goes unnoticed."""
-    with pytest.raises(Exception, match="only whitespace"):
-        Settings(env=env, api_key="   \n")
+    """Read as no-auth-configured it would open the data-plane, and an operator
+    reading the config sees a key. Refused in all three environments: the two
+    that need no key are exactly where a blank one goes unnoticed."""
+    with pytest.raises(Exception, match="no visible character"):
+        Settings(env=env, api_key=blank)
 
 
 def test_a_space_that_is_not_a_header_space_stays_part_of_the_key() -> None:
