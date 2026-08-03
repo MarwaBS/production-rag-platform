@@ -1,14 +1,11 @@
-# Reference defaults for the production RAG platform Helm chart — override per
-# environment (image, host, resources). `helm lint` + `helm template` validate
-# this chart in CI on every push.
+# Reference defaults — override per environment (image, host, resources).
+# `helm lint` + `helm template` validate this chart in CI on every push.
 #
-# IMPORTANT — single replica by design. The reference service holds its document
-# index IN PROCESS (one vector store per pod, see app/main.py). A second pod would
-# start with an empty index until it received its OWN /index call, and /query
-# against it would return 409 "index documents first". Horizontal scale-out
-# therefore requires an external shared vector store (see
-# docs/decisions/001-faiss-over-managed-vector-db.md) and is intentionally out of
-# scope for this reference deployment — so replicaCount is 1 and autoscaling is off.
+# Single replica by design: the index lives in process (app/main.py), so a second
+# pod answers /query with 409 until it receives its own /index. Scale-out needs an
+# external shared store (docs/decisions/001-faiss-over-managed-vector-db.md), which
+# is why this chart ships no HorizontalPodAutoscaler and no PodDisruptionBudget —
+# a PDB with minAvailable=1 over one replica would block node drains outright.
 replicaCount: 1
 
 image:
@@ -36,52 +33,24 @@ resources:
     cpu: "1"
     memory: 512Mi
 
-# Disabled: the in-process index makes this service single-replica (see note
-# above). Enabling the HPA would spin up pods that each answer with an empty
-# index. Re-enable only alongside an external shared store.
-autoscaling:
-  enabled: false
-  minReplicas: 1
-  maxReplicas: 1
-  targetCPUUtilizationPercentage: 70
-
-# Disabled for a single-replica workload: a PodDisruptionBudget with
-# minAvailable=1 over exactly one replica would permanently block voluntary node
-# drains (the node could never be cordoned for maintenance).
-podDisruptionBudget:
-  enabled: false
-  minAvailable: 1
-
-# DISABLED by default — secure default. Enabling this publishes the service to
-# the internet through an nginx Ingress. The data-plane (/index, /query) is only
-# authenticated when APP_API_KEY is set (see app/main.py); an unauthenticated
-# pod behind a public Ingress lets anyone replace the corpus and spend LLM
-# budget. Opt in deliberately (ingress.enabled=true) and ONLY together with:
-#   1. APP_API_KEY provided via the Secret (secrets.data), so /index + /query
-#      require X-API-Key, and
-#   2. tls.enabled=true with a real cert (set clusterIssuer for cert-manager).
+# Off by default: this publishes the service to the internet, and the data-plane
+# is only authenticated when APP_API_KEY is set. Enable it together with that key
+# (via secrets.data) and tls.enabled=true with a real cert.
 ingress:
   enabled: false
   className: nginx
   host: rag-platform.example.com
-  # TLS is OFF by default (the reference chart ships no cert). The template ties
-  # nginx `ssl-redirect` to this: forcing ssl-redirect WITHOUT a cert produces a
-  # 308 redirect to an HTTPS endpoint that can't complete the handshake — a
-  # redirect loop. When enabled, the template emits spec.tls (referencing
-  # `secretName`) AND, if set, a cert-manager `cluster-issuer` annotation to
-  # provision that secret, alongside ssl-redirect="true".
+  # Off, because the chart ships no cert, and ssl-redirect is tied to this:
+  # forcing it without a cert redirects to a handshake that cannot complete.
   tls:
     enabled: false
     secretName: rag-platform-tls
     clusterIssuer: ""  # e.g. "letsencrypt-prod"; empty omits the annotation
 
 env:
-  # APP_ENV drives the app's own typed settings (app/config.py, APP_-prefixed).
+  # Two separate knobs. APP_ENV drives app/config.py; ENV is what rag-llm-infra
+  # keys its JSON log formatter on, so the deploy needs both.
   APP_ENV: production
-  # ENV is a SEPARATE knob consumed by the rag-llm-infra package: its logging
-  # config keys the single-line-JSON formatter on ENV=prod (not APP_ENV), so
-  # without this the deployed pod would emit human-readable dev logs and the
-  # "structured JSON logs" claim would be dead in the shipped deploy.
   ENV: prod
 
 # ServiceMonitor + PrometheusRule need the prometheus-operator CRDs, so they
@@ -90,17 +59,12 @@ monitoring:
   enabled: false
   scrapeInterval: 30s
 
-# Secrets (e.g. OPENAI_API_KEY for the openai backend, APP_API_KEY to guard
-# /index) are provided through a Kubernetes Secret, never through values.
+# Credentials reach the pod through a Kubernetes Secret, never through values.
 secrets:
-  # The chart renders the Secret from `data` by default. NOTE: the app REFUSES
-  # TO BOOT with APP_ENV=production (this chart's default) and no APP_API_KEY —
-  # an unauthenticated production data-plane must not start — so an install
-  # needs `--set secrets.data.APP_API_KEY=<base64>` (or APP_ENV overridden to a
-  # non-production env for a demo). For REAL secrets, manage the Secret OUT OF
-  # BAND (kubectl create secret / sealed-secret / external-secrets) and set
-  # `create: false` — otherwise every `helm upgrade` resets the Secret's data
-  # to what's templated here, clobbering the out-of-band values.
+  # The app refuses to boot on this chart's APP_ENV=production without
+  # APP_API_KEY, so an install needs `--set secrets.data.APP_API_KEY=<base64>`.
+  # For real secrets set `create: false` and manage the Secret out of band —
+  # otherwise every `helm upgrade` overwrites its data with what is templated here.
   create: true
   # base64-encoded key/values, dev/test only — NEVER commit real secrets here:
   data: {}

@@ -31,6 +31,21 @@ def test_non_production_environments_stay_open_for_the_local_run(
     assert Settings(env=env, api_key="").api_key == ""
 
 
+@pytest.mark.parametrize("supplied", ["a-key\n", " a-key", "a-key\t", "\ra-key "])
+def test_the_key_is_taken_without_the_whitespace_around_it(supplied: str) -> None:
+    """A key reaching the process from a Secret or a .env line can carry a
+    trailing newline nobody can see. Compared raw, it matches nothing the client
+    can send, so every request 401s against a key correct in both places."""
+    assert Settings(env="development", api_key=supplied).api_key == "a-key"
+
+
+def test_a_key_of_only_whitespace_cannot_pass_for_a_configured_one() -> None:
+    """It is empty once stripped, so production must refuse it exactly as it
+    refuses an unset one rather than booting an open data-plane."""
+    with pytest.raises(Exception, match="API_KEY"):
+        Settings(env="production", api_key="   \n")
+
+
 def test_production_does_not_serve_the_interactive_docs() -> None:
     """/docs, /redoc and /openapi.json hand any ingress visitor the full API
     map. They are development conveniences; production must not mount them,

@@ -454,6 +454,9 @@ ADVERTISED_COMMANDS = (
     "helm lint",
     "helm template",
     PROVE_SEMANTIC,
+    # The SBOM is sold as a gate, so the step that reads the document back is
+    # one: generating and uploading a file cannot fail on what the file says.
+    "sbom.cyclonedx.json",
 )
 # Every step this pipeline runs, in order, by job. Pinning the gate bodies left
 # the step list open, and a step that adds nothing to a gate can still take one
@@ -527,6 +530,16 @@ PIPELINE_STEPS = {
             (),
         ),
         ("Generate CycloneDX SBOM", "anchore/sbom-action@v0.24.0", ()),
+        (
+            "Check the SBOM inventories the image",
+            None,
+            (
+                'test "$(jq -r \'.bomFormat\' sbom.cyclonedx.json)" = "CycloneDX"',
+                "components=\"$(jq '.components | length' sbom.cyclonedx.json)\"",
+                'test "$components" -gt 0',
+                'echo "SBOM inventories $components components"',
+            ),
+        ),
         ("Upload SBOM artifact", "actions/upload-artifact@v4.6.2", ()),
         ("Log in to GHCR", "docker/login-action@v3", ()),
         (
@@ -556,6 +569,7 @@ ADVERTISED_STEPS = (
     "Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)",
     "Paraphrase floor + floor-derivation reproduce (semantic-marked gates)",
     "Helm lint + render",
+    "Check the SBOM inventories the image",
 )
 
 # Every input every action may carry. Restricting only the scanners left the

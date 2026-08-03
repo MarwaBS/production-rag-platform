@@ -8,9 +8,9 @@ surfacing as a confusing error deep inside a request.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, StringConstraints, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -50,8 +50,11 @@ class Settings(BaseSettings):
     llm_retry_attempts: int = Field(default=1, ge=0)
     llm_breaker_failures: int = Field(default=3, ge=1)
     llm_breaker_reset_seconds: float = Field(default=30.0, gt=0)
-    # When set, POST /index (the destructive corpus replace) requires X-API-Key.
-    api_key: str = ""
+    # When set, both /index and /query require a matching X-API-Key.
+    # Stripped: the value usually arrives from a Kubernetes Secret or a .env
+    # line, where a trailing newline or space is invisible and would make every
+    # request 401 against a key that looks correct in both places.
+    api_key: Annotated[str, StringConstraints(strip_whitespace=True)] = ""
 
     @model_validator(mode="after")
     def _production_requires_an_api_key(self) -> Settings:

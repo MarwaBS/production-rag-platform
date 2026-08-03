@@ -1,0 +1,11 @@
+# The Dockerfile copies pyproject.toml, README.md and app/, so this bounds the
+# context sent to the daemon, not the image contents: without it every build
+# uploads .git and .venv, and a stale __pycache__ can shadow a source edit.
+.git
+.venv
+__pycache__
+*.pyc
+.coverage
+.mypy_cache
+.pytest_cache
+.ruff_cache

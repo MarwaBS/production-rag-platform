@@ -36,6 +36,7 @@ CONFIG = REPO / "pyproject.toml"
 # that is not, so naming the whole set closes the names nobody has thought of.
 MANIFEST = frozenset(
     {
+        ".dockerignore",
         ".github/workflows/ci.yml",
         ".gitignore",
         "LICENSE",
@@ -51,16 +52,13 @@ MANIFEST = frozenset(
         "deploy/docker-compose.yml",
         "deploy/helm/Chart.yaml",
         "deploy/helm/templates/deployment.yaml",
-        "deploy/helm/templates/hpa.yaml",
         "deploy/helm/templates/ingress.yaml",
-        "deploy/helm/templates/pdb.yaml",
         "deploy/helm/templates/prometheusrule.yaml",
         "deploy/helm/templates/secret.yaml",
         "deploy/helm/templates/service.yaml",
         "deploy/helm/templates/serviceaccount.yaml",
         "deploy/helm/templates/servicemonitor.yaml",
         "deploy/helm/values.yaml",
-        "docs/ci-cd-pipeline.yml",
         "docs/decisions/001-faiss-over-managed-vector-db.md",
         "docs/decisions/002-pre-grounding-over-post-filtering.md",
         "docs/decisions/003-circuit-breaker-for-llm-resilience.md",

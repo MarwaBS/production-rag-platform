@@ -56,15 +56,11 @@ settings = get_settings()
 
 
 def _require_backend_packages(s: Settings) -> None:
-    """Fail fast at startup when a selected non-default backend isn't installed.
+    """Fail at boot when a selected non-default backend isn't installed.
 
-    The base install ships only the NumPy vector store + Mock LLM; openai / faiss
-    / qdrant live in optional extras (see pyproject). Without this check a
-    misconfiguration (e.g. ``APP_LLM_BACKEND=openai`` on a base install) would
-    surface as a 500 on the FIRST /query — get_llm / get_vector_store import the
-    SDK lazily inside the request. Checking importability at boot (find_spec, no
-    live credential needed) turns that into an immediate, actionable startup
-    failure carrying the exact `pip install …[extra]` fix.
+    get_llm and get_vector_store import their SDK lazily inside the request, so
+    without this the misconfiguration surfaces as a 500 on the first /query.
+    find_spec needs no live credential, so the check costs nothing at startup.
     """
     checks = (
         ("APP_LLM_BACKEND", s.llm_backend, "openai", "openai", "openai"),
@@ -99,23 +95,11 @@ logger = logging.getLogger("app.main")
 
 
 def _route_uvicorn_logs_through_json() -> None:
-    """Under ENV=prod, make uvicorn's OWN loggers emit the same single-line JSON
-    as the app logger, so prod stdout is one uniform format.
+    """Send uvicorn's own records to the root JSON handler under ENV=prod.
 
-    rag-llm-infra installs its JSON formatter on the ROOT logger (keyed on the
-    ENV=prod env var — the Helm deploy sets it), but uvicorn installs its own
-    plain-text handlers on the `uvicorn` / `uvicorn.access` loggers with
-    ``propagate=False``. A record on `uvicorn.error` even bubbles up to
-    `uvicorn`'s plain handler and STOPS there (uvicorn.propagate is False), so
-    ALL THREE uvicorn loggers emit plain text while the app logger emits JSON —
-    prod stdout ends up a MIX of the two formats, which breaks log ingestion and
-    contradicts the README's structured-logging claim.
-
-    Clearing uvicorn's handlers and re-enabling propagation routes every
-    uvicorn.* record up to the root JSON handler, so prod logs are uniform JSON.
-    Gated on the exact condition rag-llm-infra keys its JSON formatter on
-    (ENV=prod); in dev the root handler is human-readable and uvicorn's default
-    formatting is left untouched.
+    rag-llm-infra installs its JSON formatter on the root logger, keyed on
+    ENV=prod. uvicorn keeps plain-text handlers on its three loggers with
+    ``propagate=False``, so without this prod stdout is a mix of both formats.
     """
     if os.getenv("ENV", "dev").lower() != "prod":
         return
@@ -125,24 +109,17 @@ def _route_uvicorn_logs_through_json() -> None:
         uv_logger.propagate = True
 
 
-# Route uvicorn's loggers through the root JSON handler AT IMPORT TIME (under
-# ENV=prod). uvicorn's launch order is: configure_logging() (installs uvicorn's
-# plain handlers) -> import the app module (this line runs here) -> log "Started
-# server process" / "Waiting for application startup." Rerouting at import
-# therefore lands BEFORE those two banner lines, so they emit as JSON too —
-# doing it only in the lifespan (below) left those first two prod-boot lines
-# plain text, breaking strict-JSON ingestion on every restart.
+# At import, which uvicorn reaches after installing its handlers and before the
+# two startup banner lines, so those are JSON too.
 _route_uvicorn_logs_through_json()
 
 
 @asynccontextmanager
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
-    # Belt-and-suspenders: also reroute at lifespan startup, covering launch
-    # paths where the app module is imported before uvicorn installs its logging
-    # config (so the import-time call above was a no-op). Idempotent.
+    # Again, for launch paths that import this module before uvicorn configures
+    # logging, where the call above ran too early. Idempotent.
     _route_uvicorn_logs_through_json()
-    # Startup config summary — the one line an operator needs to confirm WHAT
-    # is actually running (backends, auth posture) from the logs alone.
+    # What is actually running, for an operator reading only the logs.
     logger.info(
         "service started",
         extra={
@@ -203,19 +180,12 @@ app.add_middleware(_BodySizeLimit, max_bytes=settings.max_request_bytes)
 class _Index:
     """Immutable snapshot of the indexed corpus and its vector store.
 
-    Held behind a single module-level reference so /index swaps the whole
-    snapshot in one atomic assignment and /query reads one consistent
-    (windows, store) pair. Read in two steps, a /query interleaved with a
-    re-index could pair a new store with stale windows and raise IndexError; a
-    single reference makes that torn read impossible by construction.
+    One module-level reference, so /index swaps both fields in a single
+    assignment and /query cannot pair a new store with stale windows.
 
-    Atomicity caveat: the lock-free swap relies on a single name rebind being
-    atomic, which holds under CPython's GIL (the supported runtime here, and the
-    reference deployment is single-replica/single-process anyway). On a
-    free-threaded build (PEP 703, Python 3.13+ `--disable-gil`) a rebind is no
-    longer guaranteed atomic against a concurrent read; a multi-process or
-    free-threaded deployment should guard the swap with a lock (or move the
-    corpus to a shared external store).
+    That lock-free swap relies on a name rebind being atomic, which holds under
+    the GIL. On a free-threaded build (PEP 703) it does not, and a multi-process
+    or free-threaded deployment needs a lock or an external store.
     """
 
     # One row per retrieval window, aligned with the store's vector rows:
@@ -391,21 +361,15 @@ app.add_middleware(_RequestContext)
 
 
 def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
-    """Guard the API's data-plane (/index and /query) when APP_API_KEY is configured.
+    """Guard /index and /query when APP_API_KEY is set; unset leaves both open.
 
-    Unset (the default) leaves both open for the no-auth local/demo run. When
-    set, /index AND /query require a matching X-API-Key header: /index REPLACES
-    the entire corpus (must not be world-writable in a shared deployment), and
-    /query reads that corpus back and spends LLM budget on every call — leaving
-    it open while guarding /index would let anyone exfiltrate the indexed
-    documents and burn the model allowance. The probes (/health, /ready,
-    /metrics) stay open so liveness checks and Prometheus scraping need no key.
+    Both, not just /index: /query reads the corpus back and spends LLM budget,
+    so guarding only the write leaves the documents readable. The probes stay
+    open so liveness checks and Prometheus need no key.
 
-    The comparison is constant-time (secrets.compare_digest over the encoded
-    bytes): a plain equality check short-circuits at the first differing byte,
-    leaking a timing signal about how much of a guessed key prefix matched.
-    Encoding to bytes also keeps a non-ASCII header value from raising inside
-    compare_digest.
+    compare_digest, because a plain equality check short-circuits at the first
+    differing byte and leaks how much of a guessed prefix matched. Encoding to
+    bytes also keeps a non-ASCII header from raising inside it.
     """
     if not settings.api_key:
         return

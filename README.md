@@ -2,7 +2,7 @@
 
 A deployable reference RAG service that grounds every generated answer in the caller's own documents — served behind a typed API and shipped with the full production envelope: containerized, Kubernetes-deployable, observable, CI-gated.
 
-**[Open infrastructure: rag-llm-infra](https://pypi.org/project/rag-llm-infra/)** (the published package this service runs on) · the private flagship product built on the same design, ResumeForge, is [live here](https://resumeforge-bg29.onrender.com) (separate codebase — see the boundary table below)
+**[Open infrastructure: rag-llm-infra](https://pypi.org/project/rag-llm-infra/)** — the published package this service runs on.
 
 Stack: FastAPI · rag-llm-infra · NumPy retrieval (FAISS/Qdrant optional) · Prometheus · structured JSON logs · Docker · Kubernetes/Helm · GitHub Actions
 
@@ -31,16 +31,14 @@ Kubernetes-deployable, observable, and CI/CD-gated.
 >
 > | | Runs in this repo (`app/`) | Design context only |
 > |---|---|---|
-> | **What** | A runnable reference RAG service on the published [`rag-llm-infra`](https://pypi.org/project/rag-llm-infra/) package | ADRs + the "full system" diagram for a separate **private** product (ResumeForge) |
+> | **What** | A runnable reference RAG service on the published [`rag-llm-infra`](https://pypi.org/project/rag-llm-infra/) package | ADRs + the "full system" diagram for a separate **private** product |
 > | **Includes** | typed config · auth + input validation · `/index` `/query` `/health` `/ready` `/metrics` · structured logs · Helm chart · Dockerfile | Redis cache · arq workers · OTel tracing · semantic validation · PDF output · rate limiting |
 > | **Status** | real, runs locally, **CI-gated** (image build + Trivy · integration tests · Helm lint+render · hadolint · SBOM) | the proprietary generation logic is **not** in this repo |
 >
 > Sections below are labelled _"full system"_ when they describe the private architecture, so you
 > can always tell what executes here from what's design context.
 
-**Run it in 30 seconds** — [jump to quickstart](#run-the-reference-service). The private product
-ResumeForge is live at **[resumeforge-bg29.onrender.com](https://resumeforge-bg29.onrender.com)**
-(a separate codebase — *not* this service; free tier, ~30s cold start).
+**Run it in 30 seconds** — [jump to quickstart](#run-the-reference-service).
 
 ## Run the reference service
 
@@ -74,7 +72,22 @@ The runnable `app/` service:
 - Typed config (pydantic-settings, validated), structured logging, input
   validation, single-replica Helm chart, multi-stage non-root Docker image.
 
-Retrieval backend is NumPy by default (`faiss`/`qdrant` available via extras).
+Two retrieval choices, both defaulting to the dependency-free option:
+
+- **Vector store** — NumPy by default; `faiss` / `qdrant` via extras.
+- **Embedder** — a 128-dimension token-count hash by default (`APP_EMBEDDING_BACKEND=hash`).
+  It matches **words, not meaning**, so it retrieves few paraphrases that share no token
+  with their document, and recall falls as the corpus grows — both measured, in
+  [eval_floors_derivation.json](eval_floors_derivation.json) and
+  [scale_cliff_derivation.json](scale_cliff_derivation.json). Set
+  `APP_EMBEDDING_BACKEND=semantic` with the `semantic` extra for SentenceTransformers
+  (`all-MiniLM-L6-v2`); a separate CI job holds that backend to paraphrase floors the
+  hash embedder cannot satisfy.
+
+**The corpus is not persisted.** It lives in the process (one vector store per pod) and is
+built by `POST /index`, which replaces it wholly; a restart leaves the service answering
+409 until it is indexed again. Persistence and multi-tenancy are out of scope here — both
+need the external shared store described in ADR-001.
 
 ## System overview — full production architecture (the private system)
 
@@ -99,7 +112,7 @@ flowchart LR
 | Component | Responsibility | Stack | In this repo |
 |---|---|---|---|
 | **API gateway** | Typed request/response, API-key auth, validation | FastAPI, Pydantic v2 | ✅ (rate limiting: private) |
-| **Retrieval** | Grounds generation in the user's own evidence | FAISS / Qdrant, SentenceTransformers | ✅ (NumPy default; FAISS/Qdrant via extras) |
+| **Retrieval** | Grounds generation in the user's own evidence | FAISS / Qdrant, SentenceTransformers | ✅ NumPy store + hash embedder by default; FAISS/Qdrant and SentenceTransformers via extras |
 | **Generation** | Vendor-neutral model calls behind a protocol | OpenAI, LLM-provider abstraction | ✅ (via `rag-llm-infra`) |
 | **Validation** | Flags generated claims not supported by the input | semantic-similarity checks | ◻ private |
 | **State** | Caching, daily cost ceiling, async jobs | Redis, arq | ◻ private |
@@ -118,18 +131,22 @@ OpenTelemetry traces · slowapi rate limiting · semantic validation · PDF outp
 
 ## Architecture decisions
 
+> These record decisions taken for the **full system** — the private product. Each ADR
+> below says in its own header which parts hold in this repo and which do not, so a
+> decision written for the private architecture is never read as a description of `app/`.
+
 Full summaries in **[docs/decisions/](docs/decisions/)**:
 
-- **[ADR-001](docs/decisions/001-faiss-over-managed-vector-db.md)** — FAISS over a managed vector DB (sub-ms search, zero standing infra, per-request isolation).
-- **[ADR-002](docs/decisions/002-pre-grounding-over-post-filtering.md)** — Pre-grounding over post-filtering (prevention beats detection; clean audit trail).
-- **[ADR-003](docs/decisions/003-circuit-breaker-for-llm-resilience.md)** — Circuit breaker for LLM resilience (timeout, bounded retry, fail fast, self-heal).
+- **[ADR-001](docs/decisions/001-faiss-over-managed-vector-db.md)** — An in-process index over a managed vector DB (sub-ms search, zero standing infra), and what that costs: no persistence, no scale-out.
+- **[ADR-002](docs/decisions/002-pre-grounding-over-post-filtering.md)** — Pre-grounding over post-filtering (prevention beats detection; clean audit trail). The post-generation check is _full system_ only.
+- **[ADR-003](docs/decisions/003-circuit-breaker-for-llm-resilience.md)** — Circuit breaker for LLM resilience (timeout, bounded retry, fail fast, self-heal) — implemented here, at single-replica scope.
 - **[ADR-004](docs/decisions/004-vendor-neutral-llm-protocol.md)** — Vendor-neutral LLM protocol (model vendor is a config choice; open-sourced in `rag-llm-infra`).
 
 ## Deployment
 
 - **Container** — multi-stage `python:3.12.8-slim-bookworm`, runs as a non-root user, Trivy-scanned in CI: **[deploy/Dockerfile](deploy/Dockerfile)**.
-- **Orchestration** — single-replica Helm chart (Deployment / Service / Ingress / ServiceAccount / Secret; HPA + PDB templates ship but are disabled by default because the index is in-process — see [values.yaml](deploy/helm/values.yaml)): **[deploy/helm/](deploy/helm/)**. The **Ingress is disabled by default** (secure default): a bare install exposes nothing publicly. Opt in with `ingress.enabled=true` only alongside `APP_API_KEY` (so `/index` + `/query` require a key) and `tls.enabled=true` with a real cert.
-- **Image publishing** — on merge to `main`, CI builds the image and pushes `:latest`, a commit-SHA tag, and the chart's `appVersion` tag (so a bare `helm install` resolves an image that exists) to GHCR. This repo does **not** auto-deploy anywhere; the live demo above is the separate ResumeForge product.
+- **Orchestration** — single-replica Helm chart (Deployment / Service / Ingress / ServiceAccount / Secret). No HorizontalPodAutoscaler and no PodDisruptionBudget ship: the index is in-process, so extra replicas answer with an empty corpus — see [values.yaml](deploy/helm/values.yaml): **[deploy/helm/](deploy/helm/)**. The **Ingress is disabled by default** (secure default): a bare install exposes nothing publicly. Opt in with `ingress.enabled=true` only alongside `APP_API_KEY` (so `/index` + `/query` require a key) and `tls.enabled=true` with a real cert.
+- **Image publishing** — on merge to `main`, CI builds the image and pushes `:latest`, a commit-SHA tag, and the chart's `appVersion` tag (so a bare `helm install` resolves an image that exists) to GHCR. This repo does **not** auto-deploy anywhere.
 
 ## CI/CD
 
@@ -145,14 +162,13 @@ sentence-transformers extra and runs the paraphrase floors, which the default wo
 satisfy — that job's only test step is [`scripts/check_semantic_report.py`](scripts/check_semantic_report.py), which
 starts the run itself into a directory it creates and fails the build unless every semantic gate appears in the
 report that run wrote as having passed · `helm lint` + `helm template`
-render · `hadolint` on the Dockerfile · Docker image build · **Trivy** image scan · **CycloneDX SBOM**
-generation (uploaded as an artifact). The image publish waits on the test, semantic and IaC jobs together.
+render · `hadolint` on the Dockerfile · Docker image build · **Trivy** image scan · a **CycloneDX SBOM**
+that is generated, read back (a document listing no components fails the build) and uploaded as an
+artifact. The image publish waits on the test, semantic and IaC jobs together.
 On merge to `main` it also pushes the scanned image to GHCR.
 
-The eval here is a *retrieval*-quality gate (the shipped Mock LLM makes generation a fixed template). The
-**private production system's** fuller pipeline (LLM answer-quality / golden-dataset evaluation, unit/integration
-split, etc.) is sketched for reference in **[docs/ci-cd-pipeline.yml](docs/ci-cd-pipeline.yml)** — an
-illustrative document, not an executed workflow in this repo.
+The eval here is a *retrieval*-quality gate: the shipped Mock LLM makes generation a fixed template, so
+answer quality is not something this repo can measure.
 
 No secrets live in source; credentials are injected via repository secrets and a Kubernetes Secret.
 

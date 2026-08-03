@@ -1,8 +1,9 @@
 # ADR 003 — Circuit breaker for LLM resilience
 
-**Status:** Accepted — rewritten 2026-07-29 to describe the shipped mechanism.
-The earlier text of this ADR described retry-with-backoff and a daily cost
-ceiling that were never implemented in this repository.
+**Status:** Accepted
+
+**Scope:** implemented in this repo, in `app/main.py`. Read the "what a breaker
+is worth at one replica" section below before taking it for fleet protection.
 
 ## Context
 

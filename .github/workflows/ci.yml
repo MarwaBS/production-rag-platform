@@ -114,6 +114,15 @@ jobs:
           image: ${{ env.IMAGE }}:ci
           format: cyclonedx-json
           output-file: sbom.cyclonedx.json
+      - name: Check the SBOM inventories the image
+        # Generating and uploading a file is not evidence: an SBOM that lists no
+        # components is well-formed, uploads, and passes. Reading it back is what
+        # makes this step able to fail.
+        run: |
+          test "$(jq -r '.bomFormat' sbom.cyclonedx.json)" = "CycloneDX"
+          components="$(jq '.components | length' sbom.cyclonedx.json)"
+          test "$components" -gt 0
+          echo "SBOM inventories $components components"
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4.6.2
         with:
