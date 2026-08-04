@@ -15,6 +15,9 @@ spec:
         app: {{ .Release.Name }}
     spec:
       serviceAccountName: {{ .Release.Name }}
+      # The app never calls the Kubernetes API, so the mounted token would be
+      # only a credential waiting to be stolen.
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -43,6 +46,10 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ .Release.Name }}-secrets
+                # With secrets.create=false the chart renders no Secret, so a
+                # required reference wedges the pod in CreateContainerConfigError
+                # on the chart's own documented external-secret path.
+                optional: true
           env:
             # Render every key under .Values.env (sorted, so the output is
             # deterministic) — hardcoding a single key here is how ENV=prod
@@ -59,16 +66,25 @@ spec:
           # no traffic to an un-indexed pod, so it could never receive the
           # /index call that makes it ready. /ready is an app-level signal for
           # clients to poll, exposed by the API but intentionally not the probe.
+          # Explicit probe timing: the cluster default is a 1s timeout, which a
+          # pod busy with a full-size legal request can exceed — timing must be
+          # a stated decision, not an inherited default.
           readinessProbe:
             httpGet:
               path: /health
               port: {{ .Values.service.targetPort }}
             initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health
               port: {{ .Values.service.targetPort }}
             initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
       volumes:
         # Writable scratch for the read-only-root container (Python/uvicorn temp).
         - name: tmp

@@ -1,0 +1,20 @@
+{
+  "embedder": "hash",
+  "embedder_dimensions": 128,
+  "queries": "evals.harness.QUERIES",
+  "queries_evaluated": 12,
+  "distractor_construction": "note<i> plus 8 words cycling through the corpus's own vocabulary, which repeats every 197 documents: competition on the words the queries themselves use",
+  "control_construction": "the identical construction over a pool of the same size that the corpus shares no word with. Beyond one new token per document, the pool's own 197 words are unseen too, so the control carries more distinct vocabulary than the curve above, not less",
+  "recall_at_3": {
+    "24": 1.0,
+    "100": 1.0,
+    "1000": 1.0,
+    "10000": 0.75
+  },
+  "recall_at_3_control": {
+    "24": 1.0,
+    "100": 1.0,
+    "1000": 1.0,
+    "10000": 1.0
+  }
+}

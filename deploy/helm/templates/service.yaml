@@ -9,6 +9,8 @@ spec:
   selector:
     app: {{ .Release.Name }}
   ports:
-    - port: {{ .Values.service.port }}
+    # Named so the ServiceMonitor can reference the port by name.
+    - name: http
+      port: {{ .Values.service.port }}
       targetPort: {{ .Values.service.targetPort }}
       protocol: TCP

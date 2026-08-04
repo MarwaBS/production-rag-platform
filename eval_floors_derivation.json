@@ -1,0 +1,40 @@
+{
+  "baseline": "semantic backend on the zero-overlap paraphrase set",
+  "semantic_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "n_paraphrase_queries": 26,
+  "corpus_documents": 24,
+  "floor_rule": "measured minus half a miss-quantum (0.5/n)",
+  "measured": {
+    "semantic_paraphrase": {
+      "recall_at_1": 0.6923,
+      "recall_at_3": 0.9231,
+      "mrr": 0.7949
+    },
+    "semantic_literal": {
+      "recall_at_1": 1.0,
+      "recall_at_3": 1.0,
+      "mrr": 1.0
+    },
+    "hash_paraphrase": {
+      "recall_at_1": 0.1154,
+      "recall_at_3": 0.1538,
+      "mrr": 0.1346
+    },
+    "hash_literal": {
+      "recall_at_1": 0.9167,
+      "recall_at_3": 1.0,
+      "mrr": 0.9583
+    }
+  },
+  "derived_floors": {
+    "recall_at_1": 0.6731,
+    "recall_at_3": 0.9039,
+    "mrr": 0.7757
+  },
+  "n_literal_queries": 12,
+  "derived_floors_default_path": {
+    "recall_at_1": 0.875,
+    "recall_at_3": 0.9583,
+    "mrr": 0.9166
+  }
+}

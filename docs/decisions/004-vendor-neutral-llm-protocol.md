@@ -2,6 +2,11 @@
 
 **Status:** Accepted
 
+**Scope:** implemented in this repo, through the published `rag-llm-infra` package.
+`APP_LLM_BACKEND` selects the backend; the default is the deterministic mock, so the
+service runs with no provider credential. The multi-provider fallback named under Why
+exists in that package but is **not** wired in here.
+
 ## Context
 Calling a single provider's SDK directly throughout the codebase creates vendor lock-in and
 brittle test setups (tests that patch SDK internals by dotted path).

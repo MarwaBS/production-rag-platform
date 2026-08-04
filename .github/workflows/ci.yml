@@ -27,30 +27,68 @@ jobs:
       - name: Format check
         run: ruff format --check .
       - name: Type-check
-        run: mypy app evals tests
-      - name: Integration tests
-        run: pytest -q
+        run: mypy app evals scripts tests
+      - name: Audit Python dependencies (pip-audit)
+        # Trivy scans the built image; this catches a vulnerable pin at PR
+        # time, before an image is ever built.
+        run: |
+          pip install pip-audit -c constraints-dev.txt
+          pip-audit
+      - name: Integration tests (the run has to account for every test it selects; coverage floor enforced)
+        # This step IS the test run. A conftest that marks items skipped leaves
+        # them collected and the run green, so the checker starts the run and
+        # requires the report it wrote to account for every test in the source.
+        run: python -B -m scripts.check_suite_report
       - name: Retrieval eval (recall gate enforced in tests/test_eval.py; print the numbers)
         run: python -m evals
+
+  semantic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache the embedding model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-all-MiniLM-L6-v2
+      - run: python -m pip install --upgrade pip
+      - name: Install with the semantic extra
+        run: pip install -e ".[dev,semantic]" -c constraints-dev.txt
+      - name: Paraphrase floor + floor-derivation reproduce (semantic-marked gates)
+        # This step IS the test run. The checker starts it and reads the report
+        # that run wrote, because neither an exit status nor a report handed to
+        # a separate step can show which gates actually executed.
+        run: python -B -m scripts.check_semantic_report
 
   iac:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
-      - name: Helm lint + render
+      - name: Helm lint + render (defaults, then every opt-in template)
+        # Rendering defaults alone never reaches the ingress, TLS, ServiceMonitor
+        # or PrometheusRule templates, so a broken one ships unrendered.
         run: |
           helm lint deploy/helm
           helm template release deploy/helm > /dev/null
+          helm template release deploy/helm \
+            --set ingress.enabled=true \
+            --set ingress.tls.enabled=true \
+            --set ingress.tls.clusterIssuer=letsencrypt-prod \
+            --set monitoring.enabled=true \
+            --set secrets.data.APP_API_KEY=c2VjcmV0 > /dev/null
       - name: Lint Dockerfile (hadolint)
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: deploy/Dockerfile
-          failure-threshold: error
+          failure-threshold: warning
 
   docker:
     runs-on: ubuntu-latest
-    needs: [test, iac]
+    needs: [test, semantic, iac]
     permissions:
       contents: read
       packages: write
@@ -68,8 +106,8 @@ jobs:
           load: true
           tags: ${{ env.IMAGE }}:ci
       - name: Trivy image scan (fail on fixable HIGH/CRITICAL)
-        # Pinned to a release tag (not @master) so a scanner change can't silently
-        # alter the gate, matching the rest of the pinned actions in this file.
+        # Pinned to an exact version so a re-pointed tag cannot change the
+        # verdict. The actions without an exact pin still float on majors.
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:ci
@@ -78,14 +116,40 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           vuln-type: os,library
+      - name: Run the built image and exercise its API
+        # Everything else reads the image without starting it, so a broken CMD,
+        # a missing runtime dependency or a non-executable entrypoint stays
+        # green through build, scan and publish.
+        run: |
+          docker run -d --name smoke -p 8000:8000 "$IMAGE:ci"
+          for _ in $(seq 30); do
+            if curl -fsS localhost:8000/health > /dev/null; then serving=1; break; fi
+            sleep 1
+          done
+          docker logs smoke
+          test -n "${serving:-}"
+          curl -fsS -XPOST localhost:8000/index -H 'content-type: application/json' \
+            -d '{"documents":["a document the smoke test can retrieve"]}'
+          curl -fsS -XPOST localhost:8000/query -H 'content-type: application/json' \
+            -d '{"query":"retrieve","k":1}'
+          docker rm -f smoke
       - name: Generate CycloneDX SBOM
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@v0.24.0
         with:
           image: ${{ env.IMAGE }}:ci
           format: cyclonedx-json
           output-file: sbom.cyclonedx.json
+      - name: Check the SBOM inventories the image
+        # Generating and uploading a file is not evidence: an SBOM that lists no
+        # components is well-formed, uploads, and passes. Reading it back is what
+        # makes this step able to fail.
+        run: |
+          test "$(jq -r '.bomFormat' sbom.cyclonedx.json)" = "CycloneDX"
+          components="$(jq '.components | length' sbom.cyclonedx.json)"
+          test "$components" -gt 0
+          echo "SBOM inventories $components components"
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: sbom-cyclonedx
           path: sbom.cyclonedx.json
@@ -106,14 +170,13 @@ jobs:
           v="$(awk -F'"' '/^appVersion:/ {print $2}' deploy/helm/Chart.yaml)"
           test -n "$v"  # fail loudly rather than pushing a malformed empty tag
           echo "app_version=$v" >> "$GITHUB_OUTPUT"
-      - name: Push scanned image to GHCR (latest + commit SHA + chart appVersion)
+      - name: Push the scanned image to GHCR (latest + commit SHA + chart appVersion)
+        # Tagged and pushed from the local image the scan and the SBOM read, so
+        # the bytes published are the bytes vetted. Building a second time here
+        # would publish an artefact nothing in this job ever inspected.
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:${{ github.sha }}
-            ${{ env.IMAGE }}:${{ steps.chart.outputs.app_version }}
+        run: |
+          for tag in latest "$GITHUB_SHA" "${{ steps.chart.outputs.app_version }}"; do
+            docker tag "$IMAGE:ci" "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done

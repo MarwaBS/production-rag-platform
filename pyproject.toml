@@ -7,7 +7,10 @@ name = "production-rag-platform"
 version = "1.0.0"
 description = "Deployable reference RAG service built on the rag-llm-infra package: typed config, structured logging, Prometheus metrics, health/readiness probes, and an index/query API."
 readme = "README.md"
-requires-python = ">=3.10"
+# 3.12 is the only version anything here is held to: the image, CI, the badge,
+# ruff's target and mypy's python_version all say 3.12, and nothing runs an older
+# interpreter, so a wider floor would be a claim no gate stands behind.
+requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "Marwa Ben Salem" }]
 dependencies = [
@@ -27,7 +30,8 @@ dependencies = [
 openai = ["rag-llm-infra[openai]>=0.1.1"]
 faiss = ["rag-llm-infra[faiss]>=0.1.1"]
 qdrant = ["rag-llm-infra[qdrant]>=0.1.1"]
-dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.6", "mypy>=1.11"]
+semantic = ["sentence-transformers>=3.0"]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "httpx>=0.27", "ruff>=0.6", "mypy>=1.11", "pyyaml>=6.0", "types-PyYAML>=6.0"]
 
 [project.urls]
 Homepage = "https://github.com/MarwaBS/production-rag-platform"
@@ -48,13 +52,20 @@ ignore = ["E501"]
 [tool.mypy]
 python_version = "3.12"
 warn_unused_configs = true
+# Off by default, and a function with no annotation anywhere is then a body
+# nothing judges — a waiver that leaves neither a directive nor a decorator.
+check_untyped_defs = true
 
-# rag-llm-infra ships no py.typed marker yet, so mypy can't see its types.
-# Scope the missing-imports allowance to that package only — everything else
-# stays strictly checked.
+# Two packages mypy cannot resolve here: rag-llm-infra ships no py.typed marker,
+# and sentence-transformers is an optional extra the type-check environment does
+# not install. Scoped to these two — everything else stays strictly checked.
 [[tool.mypy.overrides]]
-module = ["rag_llm_infra.*"]
+module = ["rag_llm_infra.*", "sentence_transformers.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-addopts = "-ra"
+# The semantic marker covers gates that measure meaning rather than word
+# overlap. Deselected by default because a base install cannot satisfy them;
+# install the `semantic` extra and select them with `-m semantic`.
+addopts = "-ra -m 'not semantic'"
+markers = ["semantic: needs a semantic embedder; not satisfiable by the shipped one"]

@@ -1,0 +1,41 @@
+{
+  "guarantee_corpus": "evals.harness.CORPUS",
+  "n_sentences": 24,
+  "sentence_chars": [
+    56,
+    60,
+    61,
+    61,
+    61,
+    62,
+    63,
+    65,
+    65,
+    66,
+    67,
+    68,
+    69,
+    70,
+    71,
+    72,
+    72,
+    75,
+    75,
+    75,
+    75,
+    78,
+    79,
+    83
+  ],
+  "longest_sentence_chars": 83,
+  "semantic_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "model_token_limit": 256,
+  "special_tokens_reserved": 2,
+  "assumed_chars_per_wordpiece": 1,
+  "assumption_limit": "text whose characters cost one wordpiece each; scripts that cost more per character can still overflow the sequence limit",
+  "embedder_window_chars": 254,
+  "derived_defaults": {
+    "chunk_overlap_chars": 83,
+    "max_chunk_chars": 254
+  }
+}

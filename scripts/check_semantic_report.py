@@ -1,0 +1,60 @@
+"""Run the semantic gates and prove every one of them passed.
+
+What these gates measure with is a model cached under the home directory, which
+is outside the tree, outside the pinned dependency set, and outside every
+reading the run is started from. That is a stated boundary, not a closed one.
+
+Run: python -B -m scripts.check_semantic_report
+"""
+
+from __future__ import annotations
+
+import pathlib
+import re
+import subprocess
+import sys
+from typing import List, Set
+
+from scripts.gate_report import Runner, keyed, prove, tracked_test_files
+
+_MARKED = re.compile(r"@pytest\.mark\.semantic\s*\ndef (test_\w+)", re.MULTILINE)
+
+
+def required_tests() -> Set[str]:
+    """Every semantic-marked test in the suite, keyed the way the report keys it."""
+    return {
+        keyed(path, name)
+        for path in tracked_test_files()
+        for name in _MARKED.findall(path.read_text(encoding="utf-8"))
+    }
+
+
+def _pytest_command(report: pathlib.Path) -> List[str]:
+    return [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        # The settings this run gets are the ones read above, not whatever
+        # file happens to be found first.
+        "-c",
+        "pyproject.toml",
+        "-m",
+        "semantic",
+        f"--junitxml={report}",
+    ]
+
+
+def check(runner: Runner = subprocess.call) -> List[str]:
+    return prove(required_tests(), _pytest_command, runner)
+
+
+def main() -> None:
+    problems = check()
+    if problems:
+        sys.exit("the semantic gates are unproven:\n  " + "\n  ".join(problems))
+    sys.stdout.write(f"{len(required_tests())} semantic gate(s) ran and passed\n")
+
+
+if __name__ == "__main__":
+    main()

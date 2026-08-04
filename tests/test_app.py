@@ -7,6 +7,7 @@ torn-read regression, and optional API-key auth on the destructive write.
 """
 
 import threading
+from typing import Callable
 
 import pytest
 from fastapi.testclient import TestClient
@@ -28,12 +29,6 @@ def _reset_index():
 
 def test_health() -> None:
     assert client.get("/health").json() == {"status": "ok"}
-
-
-def test_metrics_exposes_prometheus() -> None:
-    r = client.get("/metrics")
-    assert r.status_code == 200
-    assert "rag_requests_total" in r.text
 
 
 def test_ready_503_before_index() -> None:
@@ -58,12 +53,16 @@ def test_index_then_query_grounds_answer() -> None:
     ]
     r = client.post("/index", json={"documents": docs})
     assert r.status_code == 201
-    assert r.json() == {"indexed": 2}
+    assert r.json() == {"indexed": 2, "chunks": 2}
     body = client.post(
         "/query", json={"query": "vector similarity search", "k": 1}
     ).json()
-    assert body["retrieved"] == ["FAISS in-process vector similarity search"]
-    assert "grounded" in body["answer"]
+    assert body["grounded"] is True
+    assert [hit["text"] for hit in body["retrieved"]] == [
+        "FAISS in-process vector similarity search"
+    ]
+    # The answer must carry its evidence, not merely assert that it has some.
+    assert "FAISS" in body["answer"]
 
 
 def test_query_before_index_returns_409() -> None:
@@ -73,10 +72,9 @@ def test_query_before_index_returns_409() -> None:
 
 
 def test_query_409_path_is_observed_in_latency_histogram() -> None:
-    """Regression: latency was observed only on the success tail, so the 409
-    "not indexed" path (and errors) never entered the histogram, understating
-    real latency. The observe() now runs in a finally, so a 409 must bump the
-    histogram's count."""
+    """Observed in a finally, so the handler's 409 and error exits are timed
+    and not only its success tail, which would understate latency and hide a
+    slow failure. Rejections before the body (401, 413, 422) never reach it."""
     from prometheus_client import REGISTRY
 
     def _count() -> float:
@@ -110,7 +108,8 @@ def test_index_replaces_corpus_not_additive() -> None:
     client.post("/index", json={"documents": ["first corpus alpha"]})
     client.post("/index", json={"documents": ["second corpus beta"]})
     body = client.post("/query", json={"query": "corpus", "k": 5}).json()
-    assert body["retrieved"] == ["second corpus beta"]  # the old corpus is gone
+    # The old corpus is gone entirely.
+    assert [hit["text"] for hit in body["retrieved"]] == ["second corpus beta"]
 
 
 def test_reindex_with_smaller_corpus_never_500s() -> None:
@@ -124,27 +123,43 @@ def test_reindex_with_smaller_corpus_never_500s() -> None:
     client.post("/index", json={"documents": ["only one doc about vectors"]})
     r = client.post("/query", json={"query": "vectors", "k": 5})
     assert r.status_code == 200
-    assert r.json()["retrieved"] == ["only one doc about vectors"]
+    assert [hit["text"] for hit in r.json()["retrieved"]] == [
+        "only one doc about vectors"
+    ]
+
+
+def _corpus(n: int) -> list[str]:
+    """Documents a query can rank apart, with the best match at the HIGHEST index.
+
+    Ranking matters to what this test can detect. If every document scores the
+    same, the store returns ties in ascending index order, so the top hit is
+    always index 0 — which is in range for any corpus, and a query that read a
+    larger store than its document list would still find something to return.
+    Weighting the match toward the end makes the returned index large, so pairing
+    a big store with a small document list resolves out of range instead.
+    """
+    return [f"document {i} " + ("vectors " * (i + 1)) for i in range(n)]
 
 
 def test_concurrent_reindex_and_query_never_5xx() -> None:
-    # Concurrency regression for the torn read: with the old two-key state a
-    # query interleaved with a re-index could pair a new store with stale docs
-    # and 500. The single atomic snapshot makes that impossible — no request
-    # should ever see a 5xx, no matter the interleaving.
-    client.post("/index", json={"documents": [f"d{i} vectors" for i in range(10)]})
+    # Exercises the two paths against each other under real threads. It cannot
+    # guarantee it lands in the one-bytecode window a torn publish would open —
+    # the structural check below is what proves that window does not exist — so
+    # what this rules out is the broader class: a handler that errors when the
+    # corpus changes size beneath it.
+    # raise_server_exceptions=False so a handler error becomes a 500 this thread
+    # can record, instead of an exception the default client re-raises inside it.
+    observer = TestClient(app, raise_server_exceptions=False)
+    observer.post("/index", json={"documents": _corpus(10)})
     errors: list[int] = []
 
     def reindexer() -> None:
         for i in range(40):
-            n = 1 if i % 2 else 10
-            client.post(
-                "/index", json={"documents": [f"d{j} vectors" for j in range(n)]}
-            )
+            observer.post("/index", json={"documents": _corpus(2 if i % 2 else 10)})
 
     def querier() -> None:
         for _ in range(40):
-            r = client.post("/query", json={"query": "vectors", "k": 5})
+            r = observer.post("/query", json={"query": "vectors", "k": 5})
             if r.status_code >= 500:
                 errors.append(r.status_code)
 
@@ -158,9 +173,9 @@ def test_concurrent_reindex_and_query_never_5xx() -> None:
 
 
 def test_deployment_app_env_values_are_valid() -> None:
-    """Guard config/deployment drift: every APP_ENV the deploy files set must be
-    a valid Settings.env value. A 'dev' typo in docker-compose.yml used to crash
-    the service at import once env became a Literal."""
+    """Every APP_ENV the deploy files set must be a valid Settings.env value:
+    env is a Literal, so a typo in one of them is an import-time crash in the
+    deployed pod rather than a warning anywhere."""
     import pathlib
     import re
 
@@ -178,7 +193,9 @@ def test_deployment_app_env_values_are_valid() -> None:
     ]
     assert values, "expected APP_ENV declarations in the deploy files"
     for val in values:
-        Settings(env=val)  # raises pydantic ValidationError if not a valid Literal
+        # A probe key, because production now refuses to boot without one; the
+        # assertion here is only that the env LITERAL is valid.
+        Settings(env=val, api_key="env-literal-probe")
 
 
 def test_index_requires_api_key_when_configured(monkeypatch) -> None:
@@ -248,21 +265,108 @@ def test_query_open_when_no_api_key_configured() -> None:
 
 
 def test_api_key_comparison_is_constant_time() -> None:
-    """Guard: the API-key check must go through secrets.compare_digest. A plain
-    `!=` short-circuits at the first differing byte, leaking a timing signal
-    about how much of a guessed key prefix matched."""
-    import inspect
+    """The key comparison in app/main.py must go through secrets.compare_digest.
 
-    src = inspect.getsource(main.require_api_key)
-    assert "compare_digest" in src, "API-key check must use secrets.compare_digest"
-    assert "!=" not in src, "no short-circuiting comparison in the API-key check"
+    SCOPE, stated because it bounds what this can promise: the walk starts at
+    the guard and follows BARE-NAME calls — `helper(...)` — whose name it can
+    look up DIRECTLY IN THE MODULE NAMESPACE and find a function defined in
+    app/main.py. That is all it follows. A comparison reached any other way is
+    outside it: through an attribute (`obj.helper(...)`, a bound method, a
+    module alias), through a locally rebound name (`check = helper` then
+    `check(...)` — the lookup sees no `check` on the module), or in another
+    module. The limit is deliberate — resolving arbitrary call graphs is not a
+    test's job — and it is stated so the gate never promises coverage it lacks.
+
+    The body is parsed with the docstring removed, because reading raw source
+    would let the prose describing the property satisfy the check for it.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    def statements(func: Callable[..., object]) -> list[ast.stmt]:
+        parsed = ast.parse(textwrap.dedent(inspect.getsource(func)))
+        node = parsed.body[0]
+        assert isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        return [
+            statement
+            for statement in node.body
+            if not (
+                isinstance(statement, ast.Expr)
+                and isinstance(statement.value, ast.Constant)
+                and isinstance(statement.value.value, str)
+            )
+        ]
+
+    # The guard plus what its bare-name calls reach at module level here. Scope
+    # is in the docstring: attribute calls and other modules are out of range.
+    bodies: list[ast.stmt] = []
+    pending: list[Callable[..., object]] = [main.require_api_key]
+    seen: set[Callable[..., object]] = set()
+    while pending:
+        func = pending.pop()
+        if func in seen:
+            continue
+        seen.add(func)
+        reached = statements(func)
+        bodies += reached
+        for statement in reached:
+            for node in ast.walk(statement):
+                if not isinstance(node, ast.Call):
+                    continue
+                name = getattr(node.func, "id", "")
+                found = getattr(main, name, None) if name else None
+                if (
+                    callable(found)
+                    and getattr(found, "__module__", "") == main.__name__
+                ):
+                    pending.append(found)
+
+    tree = ast.parse("\n".join(ast.unparse(statement) for statement in bodies))
+
+    # A branch on a literal is unreachable, so a compare_digest call parked inside
+    # one would satisfy a presence check while never running.
+    assert not [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If) and isinstance(node.test, ast.Constant)
+    ], "unreachable branch in the key check"
+
+    # The digest comparison must be somewhere on the reachable path. Demanding it
+    # sit in a particular `if` would reject a correct helper that returns its
+    # result — the very refactor this walk exists to allow.
+    assert [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", getattr(node.func, "id", None))
+        == "compare_digest"
+    ], "the key must be compared with secrets.compare_digest"
+
+    # Membership and prefix tests short-circuit exactly like equality does.
+    equality: list[ast.AST] = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Compare)
+        and any(
+            isinstance(op, (ast.Eq, ast.NotEq, ast.In, ast.NotIn)) for op in node.ops
+        )
+    ]
+    equality += [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", None) in {"startswith", "endswith"}
+    ]
+    assert not equality, (
+        f"short-circuiting comparison in the key check: {[ast.unparse(n) for n in equality]}"
+    )
 
 
 def test_startup_emits_structured_config_summary(caplog) -> None:
-    """Regression: the service used to ship ZERO log statements, so the
-    'structured logs' claim was inert. Startup must emit a config summary
-    through the app logger (JSON-formatted when the process runs with
-    ENV=prod, as the Helm deploy does)."""
+    """Startup emits a config summary through the app logger, which is what
+    makes the structured-logging claim answerable: without a single log
+    statement the claim is about a formatter nothing reaches."""
     import logging
 
     with caplog.at_level(logging.INFO, logger="app.main"):
@@ -329,47 +433,101 @@ def test_pyproject_declares_every_nondefault_backend_extra() -> None:
         r"\[project\.optional-dependencies\]\n((?:.*\n)+?)\n?\[", pyproject
     )
     assert extras_block, "expected an optional-dependencies table"
-    for extra in ("openai", "faiss", "qdrant"):
+    for extra in ("openai", "faiss", "qdrant", "semantic"):
         assert re.search(rf"(?m)^{extra}\s*=", extras_block.group(1)), (
             f"backend '{extra}' is selectable in config.py but has no install extra"
         )
 
 
+# Names the same capability goes by elsewhere in the README, so an abbreviation
+# cannot smuggle a private-only capability into the hook.
+_ALIASES = {"otel": ("opentelemetry",), "rate": ("slowapi",)}
+# Words that describe rather than name, so banning them would reject ordinary prose.
+_GENERIC = {"output", "limiting", "validation"}
+
+
 def test_readme_hook_claims_only_tech_that_runs_here() -> None:
-    """Guard doc drift: the hook (everything above the first ---) must not
-    claim tech that the README's own boundary table declares private-only
-    (Redis, OpenTelemetry, arq, slowapi) or that appears nowhere in this
-    codebase at all (LangChain)."""
+    """The hook must not claim a capability the README itself calls private-only.
+
+    The banned set is read out of the boundary table, so a capability added there
+    is covered without anyone remembering to extend a list here.
+
+    LIMITATION: this is name-based. It flags the words the table uses — Redis,
+    arq, OTel — and a paraphrase that never says them ("hot answers served from
+    an in-memory store") passes. It catches drift, not deliberate rewording.
+    """
     import pathlib
+    import re
 
     readme = (pathlib.Path(__file__).resolve().parent.parent / "README.md").read_text(
         encoding="utf-8"
     )
-    hook = readme.split("\n---", 1)[0]
-    for private_only in ("LangChain", "Redis", "OpenTelemetry", "arq", "slowapi"):
-        assert private_only not in hook, (
-            f"README hook claims '{private_only}', which does not run in this repo"
+    # The table is quoted with "> ", so the row does not start at the line edge.
+    row = re.search(
+        r"^>?\s*\|\s*\*\*Includes\*\*\s*\|.*\|(.*)\|\s*$", readme, flags=re.M
+    )
+    assert row, "expected an 'Includes' row in the public/private boundary table"
+    private_only = [cell.strip() for cell in row.group(1).split("·") if cell.strip()]
+    assert len(private_only) >= 4, private_only
+
+    hook = readme.split("\n---", 1)[0].lower()
+    # Claimed nowhere in this codebase at all, so it belongs in no section.
+    banned = {"langchain"}
+    for capability in private_only:
+        # Every naming word of the cell, not just the first: "OTel tracing" and
+        # "tracing via OTel" must ban the same thing.
+        for word in re.findall(r"[A-Za-z]+", capability.lower()):
+            if word in _GENERIC or len(word) < 3:
+                continue
+            banned.add(word)
+            banned.update(_ALIASES.get(word, ()))
+    for term in sorted(banned):
+        assert not re.search(rf"\b{re.escape(term)}\b", hook), (
+            f"README hook claims '{term}', which does not run in this repo"
         )
 
 
+def _without_comments(text: str) -> str:
+    """Drop `#` comment lines so a claim in prose cannot satisfy a check on code."""
+    import re
+
+    return "\n".join(re.sub(r"#.*$", "", line) for line in text.splitlines())
+
+
 def test_default_helm_image_tag_is_published_by_ci() -> None:
-    """Regression: the chart's Deployment defaults the image tag to
-    .Chart.AppVersion, but CI used to push only :latest + :<sha> — so a bare
-    `helm install` referenced a tag that did not exist on GHCR and the pod
-    ImagePullBackOff'd. CI must derive a pushed tag from the same Chart.yaml
-    the template falls back to."""
+    """The tag a bare `helm install` resolves must be a tag CI actually pushes.
+
+    The Deployment falls back to the chart's appVersion when image.tag is empty,
+    so if CI publishes only :latest and :<sha> that default install references a
+    tag GHCR does not have and the pod cannot pull. Both halves are read with
+    comments stripped, and the CI half is matched inside the loop that pushes —
+    a mention anywhere else in the file is not a push.
+    """
     import pathlib
+    import re
 
     root = pathlib.Path(__file__).resolve().parent.parent
-    deployment = (
-        root / "deploy" / "helm" / "templates" / "deployment.yaml"
-    ).read_text()
-    assert ".Chart.AppVersion" in deployment  # the fallback the chart resolves
-    ci = (root / ".github" / "workflows" / "ci.yml").read_text()
+    deployment = _without_comments(
+        (root / "deploy" / "helm" / "templates" / "deployment.yaml").read_text()
+    )
+    image = re.search(r"^\s*image:\s*(.+)$", deployment, flags=re.M)
+    assert image and ".Chart.AppVersion" in image.group(1), (
+        f"the image tag must default to the chart appVersion, got {image and image.group(1)}"
+    )
+
+    ci = _without_comments((root / ".github" / "workflows" / "ci.yml").read_text())
     assert "deploy/helm/Chart.yaml" in ci, (
         "CI must read the appVersion from the chart itself"
     )
-    assert "steps.chart.outputs.app_version" in ci, "CI must push the appVersion tag"
+    # The tag set the push loop iterates, not a mention anywhere in the file.
+    pushed = re.search(r"^\s*for tag in (.+); do$", ci, flags=re.M)
+    assert pushed, "expected a loop naming the tags that get pushed"
+    tags = pushed.group(1)
+    for required in ("latest", "GITHUB_SHA", "steps.chart.outputs.app_version"):
+        assert required in tags, (required, tags)
+    assert re.search(r'^\s*docker push "\$IMAGE:\$tag"$', ci, flags=re.M), (
+        "the loop must push each tag it names"
+    )
 
 
 def test_default_helm_ingress_is_disabled() -> None:
@@ -398,11 +556,10 @@ def test_default_helm_ingress_is_disabled() -> None:
 
 
 def test_helm_deploy_activates_json_logging() -> None:
-    """Regression: rag-llm-infra keys its JSON log formatter on ENV=prod, but
-    the chart used to set only APP_ENV=production (and the template hardcoded
-    that single key) — so 'structured JSON logs' never activated in the shipped
-    deploy. The values must carry both knobs and the template must render every
-    key under .Values.env."""
+    """rag-llm-infra keys its JSON formatter on ENV=prod, which is a different
+    knob from the app's own APP_ENV. The values must carry both, and the
+    template must render every key under .Values.env — setting only APP_ENV
+    leaves the shipped deploy emitting human-readable logs."""
     import pathlib
     import re
 
@@ -420,13 +577,10 @@ def test_helm_deploy_activates_json_logging() -> None:
 
 
 def test_uvicorn_loggers_emit_json_under_prod(monkeypatch) -> None:
-    """Regression: under ENV=prod the app logger emits single-line JSON, but
-    uvicorn keeps its OWN plain-text handlers on the uvicorn / uvicorn.access
-    loggers with propagate=False (and uvicorn.error's records bubble to
-    uvicorn's plain handler and stop there) — so ALL uvicorn.* lines stay plain
-    text while app lines are JSON. Prod stdout was therefore a MIX of formats,
-    which breaks log ingestion and contradicts the README's structured-logging
-    claim. Every uvicorn.* logger must emit through the root JSON handler."""
+    """Under ENV=prod every uvicorn.* logger must reach the root JSON handler.
+    uvicorn holds plain-text handlers on uvicorn and uvicorn.access with
+    propagate=False, and uvicorn.error propagates into the first of those and
+    stops, so without the reroute prod stdout mixes both formats."""
     import io
     import json
     import logging
@@ -480,19 +634,13 @@ def test_uvicorn_loggers_emit_json_under_prod(monkeypatch) -> None:
 
 
 def test_uvicorn_reroute_happens_at_import_not_only_lifespan() -> None:
-    """F1 regression: the uvicorn->JSON reroute must run at MODULE IMPORT under
-    ENV=prod, not only in the lifespan. uvicorn's order is configure_logging()
-    -> import the app -> log 'Started server process' / 'Waiting for application
-    startup.', so a lifespan-only reroute leaves those first two prod-boot lines
-    plain text.
+    """Under ENV=prod the reroute must run at import, not only in the lifespan.
 
-    Verified in a FRESH subprocess (reloading app.main in-process re-registers
-    its module-level Prometheus collectors and raises Duplicated timeseries). The
-    child installs uvicorn's real logging config exactly as uvicorn does before
-    importing an app, then imports app.main under ENV=prod — the import ALONE
-    must clear the `uvicorn` logger's plain handler and set it to propagate to
-    the root JSON handler. Remove the import-time reroute (leave only the
-    lifespan one) and this fails: importing app.main no longer reroutes."""
+    uvicorn configures logging, imports the app, then logs its two boot banners —
+    so a lifespan-only reroute leaves those first lines in plain text. Runs in a
+    subprocess because re-importing app.main re-registers its Prometheus
+    collectors.
+    """
     import json
     import os
     import pathlib
@@ -508,7 +656,9 @@ def test_uvicorn_reroute_happens_at_import_not_only_lifespan() -> None:
         "import app.main  # noqa: F401 — the import-time reroute must fire here\n"
         "print(json.dumps({'propagate': uv.propagate, 'handlers': len(uv.handlers)}))\n"
     )
-    env = {**os.environ, "ENV": "prod", "APP_ENV": "production"}
+    # The probe key keeps the production boot refusal out of this test's way;
+    # what is under test here is only the logging reroute.
+    env = {**os.environ, "ENV": "prod", "APP_ENV": "production", "APP_API_KEY": "k"}
     proc = subprocess.run(
         [sys.executable, "-c", child],
         capture_output=True,
@@ -525,10 +675,9 @@ def test_uvicorn_reroute_happens_at_import_not_only_lifespan() -> None:
 
 
 def test_auth_failure_increments_auth_counter_not_request_counter(monkeypatch) -> None:
-    """Regression: a rejected (401) request was invisible to metrics — only
-    authenticated/served requests bumped a counter. A bad key must bump the
-    dedicated rag_auth_failures_total counter and must NOT be counted as a
-    served request in rag_requests_total."""
+    """A 401 never reaches a route body, so it bumps its own counter rather
+    than the served-request one: counted as served it would overstate traffic,
+    counted nowhere it would hide a credential-stuffing spike."""
     from prometheus_client import REGISTRY
 
     monkeypatch.setattr(main.settings, "api_key", "s3cret")
@@ -553,4 +702,74 @@ def test_auth_failure_increments_auth_counter_not_request_counter(monkeypatch) -
     )
     assert _index_served() == served_before, (
         "a rejected request must not count as a served /index in rag_requests_total"
+    )
+
+
+def test_every_served_endpoint_increments_its_request_counter() -> None:
+    """The counter must count. Asserting the metric NAME appears in /metrics is
+    satisfied by the HELP and TYPE lines, which are emitted with zero samples."""
+    from prometheus_client import REGISTRY
+
+    def _served(endpoint: str) -> float:
+        return (
+            REGISTRY.get_sample_value("rag_requests_total", {"endpoint": endpoint})
+            or 0.0
+        )
+
+    before = {name: _served(name) for name in ("health", "ready", "index", "query")}
+    client.get("/health")
+    client.get("/ready")
+    client.post("/index", json={"documents": ["a doc about vectors"]})
+    client.post("/query", json={"query": "vectors", "k": 1})
+    for name, was in before.items():
+        assert _served(name) == was + 1.0, (
+            f"rag_requests_total{{endpoint={name}}} did not move"
+        )
+
+
+def test_the_index_is_published_and_read_in_one_step() -> None:
+    """The snapshot invariant, checked structurally rather than by racing.
+
+    A thread test can only catch an interleave it happens to hit, and the window
+    between two writes is a single bytecode wide — the concurrency test above
+    exercises the paths but cannot be relied on to land inside it. What makes the
+    torn read impossible is the shape of the code: one name, published in one
+    assignment, read once per request. That is checkable exactly.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    def assignments(func: Callable[..., object], name: str) -> int:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+        return sum(
+            1
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign))
+            for target in (
+                [node.targets] if isinstance(node, ast.Assign) else [[node.target]]
+            )
+            for element in target
+            if isinstance(element, ast.Name) and element.id == name
+        )
+
+    def reads(func: Callable[..., object], name: str) -> int:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+        return sum(
+            1
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name)
+            and node.id == name
+            and isinstance(node.ctx, ast.Load)
+        )
+
+    assert assignments(main.index, "_index") == 1, (
+        "the corpus must be published in a single assignment; two writes leave a "
+        "window in which a reader sees one of them"
+    )
+    assert reads(main.query, "_index") == 1, (
+        "the corpus must be read once per request; two reads can straddle a write"
+    )
+    assert getattr(main._Index, "__dataclass_params__").frozen, (
+        "the published snapshot must be immutable, or it can be edited after publication"
     )

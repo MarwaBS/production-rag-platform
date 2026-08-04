@@ -1,4 +1,12 @@
 {{- if .Values.ingress.enabled }}
+{{- /* The prerequisites values.yaml states in prose, enforced: a public
+       plaintext or unauthenticated data-plane is refused, not warned about. */}}
+{{- if not .Values.ingress.tls.enabled }}
+{{- fail "ingress.enabled=true requires ingress.tls.enabled=true: refusing to publish the data-plane over plaintext" }}
+{{- end }}
+{{- if and .Values.secrets.create (not .Values.secrets.data.APP_API_KEY) }}
+{{- fail "ingress.enabled=true requires APP_API_KEY in secrets.data (or secrets.create=false with an out-of-band Secret): refusing to publish an unauthenticated data-plane" }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
