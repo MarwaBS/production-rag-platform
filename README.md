@@ -2,7 +2,7 @@
 
 A deployable reference RAG service that grounds every generated answer in the caller's own documents — served behind a typed API and shipped with the full production envelope: containerized, Kubernetes-deployable, observable, CI-gated.
 
-**[Open infrastructure: rag-llm-infra](https://pypi.org/project/rag-llm-infra/)** — the published package this service runs on.
+**[Open infrastructure: rag-llm-infra](https://pypi.org/project/rag-llm-infra/)** — the published package this service runs on. A separate private product is built on the same design; the boundary table below says which parts run here.
 
 Stack: FastAPI · rag-llm-infra · NumPy retrieval (FAISS/Qdrant optional) · Prometheus · structured JSON logs · Docker · Kubernetes/Helm · GitHub Actions
 
@@ -145,7 +145,7 @@ Full summaries in **[docs/decisions/](docs/decisions/)**:
 ## Deployment
 
 - **Container** — multi-stage `python:3.12.8-slim-bookworm`, runs as a non-root user, Trivy-scanned in CI: **[deploy/Dockerfile](deploy/Dockerfile)**.
-- **Orchestration** — single-replica Helm chart (Deployment / Service / Ingress / ServiceAccount / Secret). No HorizontalPodAutoscaler and no PodDisruptionBudget ship: the index is in-process, so extra replicas answer with an empty corpus — see [values.yaml](deploy/helm/values.yaml): **[deploy/helm/](deploy/helm/)**. The **Ingress is disabled by default** (secure default): a bare install exposes nothing publicly. Opt in with `ingress.enabled=true` only alongside `APP_API_KEY` (so `/index` + `/query` require a key) and `tls.enabled=true` with a real cert.
+- **Orchestration** — single-replica Helm chart (Deployment / Service / Ingress / ServiceAccount / Secret, plus opt-in ServiceMonitor and PrometheusRule). No HorizontalPodAutoscaler and no PodDisruptionBudget ship: the index is in-process, so extra replicas answer with an empty corpus — see [values.yaml](deploy/helm/values.yaml): **[deploy/helm/](deploy/helm/)**. The **Ingress is disabled by default** (secure default): a bare install exposes nothing publicly. Opt in with `ingress.enabled=true` only alongside `APP_API_KEY` (so `/index` + `/query` require a key) and `tls.enabled=true` with a real cert.
 - **Image publishing** — on merge to `main`, CI builds the image and pushes `:latest`, a commit-SHA tag, and the chart's `appVersion` tag (so a bare `helm install` resolves an image that exists) to GHCR. This repo does **not** auto-deploy anywhere.
 
 ## CI/CD
