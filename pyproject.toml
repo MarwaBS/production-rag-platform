@@ -56,11 +56,11 @@ warn_unused_configs = true
 # nothing judges — a waiver that leaves neither a directive nor a decorator.
 check_untyped_defs = true
 
-# rag-llm-infra ships no py.typed marker yet, so mypy can't see its types.
-# Scope the missing-imports allowance to that package only — everything else
-# stays strictly checked.
+# Two packages mypy cannot resolve here: rag-llm-infra ships no py.typed marker,
+# and sentence-transformers is an optional extra the type-check environment does
+# not install. Scoped to these two — everything else stays strictly checked.
 [[tool.mypy.overrides]]
-module = ["rag_llm_infra.*"]
+module = ["rag_llm_infra.*", "sentence_transformers.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -53,7 +53,12 @@ TOOL_CONFIG = {
         "python_version": "3.12",
         "warn_unused_configs": True,
         "check_untyped_defs": True,
-        "overrides": [{"module": ["rag_llm_infra.*"], "ignore_missing_imports": True}],
+        "overrides": [
+            {
+                "module": ["rag_llm_infra.*", "sentence_transformers.*"],
+                "ignore_missing_imports": True,
+            }
+        ],
     },
     "ruff": {
         "target-version": "py312",
