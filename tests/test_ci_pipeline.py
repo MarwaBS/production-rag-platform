@@ -866,6 +866,18 @@ def test_the_publish_waits_on_every_other_job() -> None:
     assert set(jobs["docker"]["needs"]) == set(jobs) - {"docker"}, jobs["docker"]
 
 
+def test_the_readme_names_the_jobs_the_publish_actually_waits_on() -> None:
+    """That sentence is the only prose copy of the wait list, and it drifted the
+    last time a job was added. Names, not count: a swap keeps the count."""
+    jobs = _ci()["jobs"]
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    sentence = next(
+        line for line in readme.splitlines() if "The image publish waits on" in line
+    )
+    named = {job for job in jobs if job.lower() in sentence.lower()}
+    assert named == set(jobs["docker"]["needs"]), (named, jobs["docker"]["needs"])
+
+
 def test_no_gate_step_is_conditional_and_publishing_comes_last() -> None:
     """A condition on a gate is invisible in a green run: the step is skipped,
     not failed. Publishing is rightly conditional, so the conditional steps must

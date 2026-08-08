@@ -46,28 +46,13 @@ from pydantic import (
 )
 from starlette.types import Message, Receive, Scope, Send
 
-from rag_llm_infra import (
-    VectorStoreProtocol,
-    configure_logging,
-    get_llm,
-    get_vector_store,
-)
+from rag_llm_infra import configure_logging, get_llm, get_vector_store
 
 from .chunking import chunk
 from .config import Settings, get_settings
 from .embedder import embed
 
 settings = get_settings()
-
-
-def _build_store(s: Settings) -> VectorStoreProtocol:
-    """The one place a vector store is constructed.
-
-    A test that re-spelled this call would pass while the service did something
-    else. `rag-llm-infra` 0.1.x takes the backend name alone; 0.2 requires a
-    collection for qdrant, which is why the dependency is capped below it.
-    """
-    return get_vector_store(s.vector_backend)
 
 
 def _require_backend_packages(s: Settings) -> None:
@@ -497,7 +482,7 @@ def index(req: IndexRequest, _: None = Depends(require_api_key)) -> Dict[str, in
         )
         for ordinal, piece in enumerate(pieces):
             windows.append((piece, f"{doc_id}:{ordinal}", doc_id))
-    store = _build_store(settings)
+    store = get_vector_store(settings.vector_backend)
     store.add(embed([text for text, _, _ in windows]))
     global _index
     _index = _Index(windows=tuple(windows), store=store)

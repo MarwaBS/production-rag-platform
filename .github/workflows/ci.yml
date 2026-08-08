@@ -74,10 +74,9 @@ jobs:
       - name: Install with the optional vector backends
         run: pip install -e ".[dev,faiss,qdrant]" -c constraints-dev.txt
       - name: Every advertised backend actually constructs
-        # The default job installs no extras, so it only ever exercises the
-        # "names its missing extra" half. This job installs them, so the
-        # construction half runs. pytest exits 5 when it collects nothing, so a
-        # selection that matched no test cannot pass here.
+        # Without these extras faiss and qdrant only ever reach the "names its
+        # missing extra" half; here they construct. pytest exits 5 on an empty
+        # selection, so a `-k` that matched nothing cannot pass.
         run: python -B -m pytest tests/test_app.py -q -k "permitted_backend or backend_settings_expose"
 
   iac:
@@ -123,8 +122,7 @@ jobs:
           load: true
           tags: ${{ env.IMAGE }}:ci
       - name: Trivy image scan (fail on fixable HIGH/CRITICAL)
-        # Pinned to an exact version so a re-pointed tag cannot change the
-        # verdict. The actions without an exact pin still float on majors.
+        # Pinned to a commit: a tag can be repointed, exact version or not.
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:ci

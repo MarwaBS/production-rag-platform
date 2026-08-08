@@ -14,10 +14,8 @@ requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "Marwa Ben Salem" }]
 dependencies = [
-  # Capped below 0.2: 0.1.x takes `get_vector_store(backend)` and defaults the
-  # Qdrant collection, 0.2 requires `collection=` and rejects the 0.1 call.
-  # No single call satisfies both, so the range must name the one this code
-  # is written against.
+  # Upper cap, not a preference: this code calls `get_vector_store(backend)`,
+  # the signature 0.1.x exposes, and 0.x minors carry no compatibility promise.
   "rag-llm-infra>=0.1.1,<0.2",
   "fastapi>=0.115",
   "uvicorn>=0.30",

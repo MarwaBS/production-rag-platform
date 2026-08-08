@@ -167,7 +167,7 @@ rendered rather than shipped unseen) · `hadolint` on the Dockerfile · Docker i
 image **started, with `/health`, `/index` and `/query` exercised against it**, so a broken `CMD` or a
 missing runtime dependency fails here instead of shipping · **Trivy** image scan · a **CycloneDX SBOM**
 that is generated, read back (a document listing no components fails the build) and uploaded as an
-artifact. The image publish waits on the test, semantic and IaC jobs together.
+artifact. The image publish waits on the test, semantic, backends and IaC jobs together.
 On merge to `main` it pushes **the scanned image itself** to GHCR — the local image Trivy read and the
 SBOM described, re-tagged and pushed. Nothing is rebuilt for the publish, so the bytes served are the
 bytes vetted.
