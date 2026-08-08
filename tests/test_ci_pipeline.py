@@ -874,7 +874,7 @@ def test_the_readme_names_the_jobs_the_publish_actually_waits_on() -> None:
     sentence = next(
         line for line in readme.splitlines() if "The image publish waits on" in line
     )
-    named = {job for job in jobs if job.lower() in sentence.lower()}
+    named = {job for job in jobs if re.search(rf"\b{re.escape(job)}\b", sentence, re.I)}
     assert named == set(jobs["docker"]["needs"]), (named, jobs["docker"]["needs"])
 
 

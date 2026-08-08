@@ -541,3 +541,12 @@ def test_the_suite_checker_runs_the_whole_suite_under_the_coverage_floor() -> No
     # and so does the file its settings come from.
     assert options[options.index("-p") + 1] == "pytest_cov", argv
     assert options[options.index("-c") + 1] == "pyproject.toml", argv
+
+
+def test_the_readme_sells_the_floor_the_gate_enforces() -> None:
+    """The constant calls itself the floor the README sells, and the README says
+    so in prose that nothing read until now."""
+    from scripts.check_suite_report import COVERAGE_FLOOR
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert f"under a {COVERAGE_FLOOR}% coverage floor" in readme, COVERAGE_FLOOR

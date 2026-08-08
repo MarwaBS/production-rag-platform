@@ -9,6 +9,7 @@ torn-read regression, and optional API-key auth on the destructive write.
 import threading
 from typing import Callable
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -417,7 +418,7 @@ def _permitted(field: str) -> tuple[str, ...]:
     return get_args(Settings.model_fields[field].annotation)
 
 
-_NOT_HASH = object()
+_NOT_HASH = np.zeros((1, 1), dtype="float32")
 
 
 def test_the_backend_settings_expose_the_values_this_file_checks() -> None:
@@ -441,9 +442,7 @@ def test_every_permitted_backend_starts_or_names_its_missing_extra(
 ) -> None:
     """Each Literal value must construct, or boot must refuse with the install
     hint. Reaching neither is how `faiss` came to be advertised and never
-    exercised. `embed` is the one that fails silently: it dispatches on
-    equality with "semantic", so an added value lands on the hash embedder.
-    """
+    exercised."""
     from app import embedder
     from app.config import Settings
 
@@ -479,17 +478,24 @@ def test_pyproject_declares_every_nondefault_backend_extra() -> None:
         r"\[project\.optional-dependencies\]\n((?:.*\n)+?)\n?\[", pyproject
     )
     assert extras_block, "expected an optional-dependencies table"
-    nondefault = {
-        value
-        for field in ("llm_backend", "vector_backend", "embedding_backend")
-        for value in _permitted(field)
-        if value != Settings.model_fields[field].default
-    }
-    assert nondefault, "no non-default backend derived"
-    for extra in sorted(nondefault):
-        assert re.search(rf"(?m)^{extra}\s*=", extras_block.group(1)), (
-            f"backend '{extra}' is selectable in config.py but has no install extra"
-        )
+    checked = 0
+    for field in ("llm_backend", "vector_backend", "embedding_backend"):
+        for value in _permitted(field):
+            if value == Settings.model_fields[field].default:
+                continue
+            checked += 1
+            try:
+                main._require_backend_packages(Settings.model_validate({field: value}))
+            except RuntimeError as missing:
+                # The extra the operator is actually told to install. It equals
+                # the backend's own name today, and nothing makes it.
+                extra = str(missing).split("production-rag-platform[")[1].split("]")[0]
+            else:
+                extra = value
+            assert re.search(rf"(?m)^{re.escape(extra)}\s*=", extras_block.group(1)), (
+                f"backend '{extra}' is selectable in config.py but has no install extra"
+            )
+    assert checked, "no non-default backend derived"
 
 
 # Names the same capability goes by elsewhere in the README, so an abbreviation

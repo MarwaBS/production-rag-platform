@@ -50,6 +50,11 @@ def _semantic_embed(texts: List[str]) -> np.ndarray:
 def embed(texts: List[str]) -> np.ndarray:
     # Read off the settings object per call rather than captured into a
     # constant, so the backend stays switchable; the env is read once, at import.
-    if _settings.embedding_backend == "semantic":
+    backend = _settings.embedding_backend
+    if backend == "semantic":
         return _semantic_embed(texts)
+    if backend != "hash":
+        # Not a fallback: a backend with no embedder of its own would be hashed
+        # instead, and retrieval would degrade without saying so.
+        raise ValueError(f"no embedder for APP_EMBEDDING_BACKEND={backend!r}")
     return _hash_embed(texts)
