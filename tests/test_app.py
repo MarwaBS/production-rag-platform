@@ -9,7 +9,6 @@ torn-read regression, and optional API-key auth on the destructive write.
 import threading
 from typing import Callable
 
-import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -418,12 +417,9 @@ def _permitted(field: str) -> tuple[str, ...]:
     return get_args(Settings.model_fields[field].annotation)
 
 
-_NOT_HASH = np.zeros((1, 1), dtype="float32")
-
-
 def test_the_backend_settings_expose_the_values_this_file_checks() -> None:
-    """Non-vacuity: an empty tuple would make the parametrised test below run
-    zero cases and still report green."""
+    """Pins the advertised set, so adding a backend is a deliberate act and the
+    parametrised test below cannot silently run zero cases."""
     assert _permitted("vector_backend") == ("numpy", "faiss", "qdrant")
     assert _permitted("llm_backend") == ("mock", "openai")
     assert _permitted("embedding_backend") == ("hash", "semantic")
@@ -432,18 +428,19 @@ def test_the_backend_settings_expose_the_values_this_file_checks() -> None:
 @pytest.mark.parametrize(
     "field,value",
     [
+        # The embedding backends have no constructor to call; `test_embedder.py`
+        # holds them to dispatch, boot refusal and the no-embedder refusal.
         (field, value)
-        for field in ("llm_backend", "vector_backend", "embedding_backend")
+        for field in ("llm_backend", "vector_backend")
         for value in _permitted(field)
     ],
 )
 def test_every_permitted_backend_starts_or_names_its_missing_extra(
-    field: str, value: str, monkeypatch: pytest.MonkeyPatch
+    field: str, value: str
 ) -> None:
     """Each Literal value must construct, or boot must refuse with the install
     hint. Reaching neither is how `faiss` came to be advertised and never
     exercised."""
-    from app import embedder
     from app.config import Settings
 
     settings = Settings.model_validate({field: value})
@@ -454,12 +451,8 @@ def test_every_permitted_backend_starts_or_names_its_missing_extra(
         return
     if field == "vector_backend":
         assert main.get_vector_store(value).backend_name
-    elif field == "llm_backend":
-        assert main.get_llm(value).backend_name
     else:
-        monkeypatch.setattr(embedder, "_settings", settings)
-        monkeypatch.setattr(embedder, "_semantic_embed", lambda texts: _NOT_HASH)
-        assert (embedder.embed(["x"]) is _NOT_HASH) == (value != "hash")
+        assert main.get_llm(value).backend_name
 
 
 def test_pyproject_declares_every_nondefault_backend_extra() -> None:

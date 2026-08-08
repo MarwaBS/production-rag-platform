@@ -24,8 +24,8 @@ from scripts.gate_report import Runner, keyed, prove, tracked_test_files
 # this key would not match it. The suite holds itself to the form this reads.
 _DEFINED = re.compile(r"^def (test_\w+)", re.MULTILINE)
 
-# The floor the README sells. Set below measured coverage rather than at it,
-# so an unrelated change does not trip it; pytest-cov rounds to whole percent.
+# The floor the README sells. Set below measured coverage, not at it, so an
+# unrelated change does not trip it.
 COVERAGE_FLOOR = "93"
 
 

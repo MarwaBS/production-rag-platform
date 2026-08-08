@@ -73,7 +73,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - name: Install with the optional vector backends
         run: pip install -e ".[dev,faiss,qdrant]" -c constraints-dev.txt
-      - name: Every advertised backend actually constructs
+      - name: faiss and qdrant construct instead of only naming their extra
         # Without these extras faiss and qdrant only ever reach the "names its
         # missing extra" half; here they construct. pytest exits 5 on an empty
         # selection, so a `-k` that matched nothing cannot pass.

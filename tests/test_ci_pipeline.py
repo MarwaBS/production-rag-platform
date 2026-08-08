@@ -29,6 +29,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # assertion below can be an equality rather than a search.
 PROVE_SEMANTIC = "python -B -m scripts.check_semantic_report"
 PROVE_SUITE = "python -B -m scripts.check_suite_report"
+# The selection is what makes the backends job a gate; a bare pytest invocation
+# is not distinctive enough to key on.
+PROVE_BACKENDS = '-k "permitted_backend or backend_settings_expose"'
 
 
 def _ci() -> Dict[Any, Any]:
@@ -455,6 +458,7 @@ ADVERTISED_COMMANDS = (
     # The coverage floor moved into the checker below with the run it fails on,
     # and is pinned where it now lives.
     PROVE_SUITE,
+    PROVE_BACKENDS,
     "python -m evals",
     "helm lint",
     "helm template",
@@ -526,7 +530,7 @@ PIPELINE_STEPS = {
             ('pip install -e ".[dev,faiss,qdrant]" -c constraints-dev.txt',),
         ),
         (
-            "Every advertised backend actually constructs",
+            "faiss and qdrant construct instead of only naming their extra",
             None,
             (
                 "python -B -m pytest tests/test_app.py -q "
@@ -867,8 +871,8 @@ def test_the_publish_waits_on_every_other_job() -> None:
 
 
 def test_the_readme_names_the_jobs_the_publish_actually_waits_on() -> None:
-    """That sentence is the only prose copy of the wait list, and it drifted the
-    last time a job was added. Names, not count: a swap keeps the count."""
+    """That sentence is the only prose copy of the wait list. Names, not count:
+    a swap keeps the count."""
     jobs = _ci()["jobs"]
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     sentence = next(
