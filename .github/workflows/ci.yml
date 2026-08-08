@@ -71,13 +71,19 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
-      - name: Install with the optional vector backends
-        run: pip install -e ".[dev,faiss,qdrant]" -c constraints-dev.txt
-      - name: faiss and qdrant construct instead of only naming their extra
-        # Without these extras faiss and qdrant only ever reach the "names its
-        # missing extra" half; here they construct. pytest exits 5 on an empty
-        # selection, so a `-k` that matched nothing cannot pass.
-        run: python -B -m pytest tests/test_app.py -q -k "permitted_backend or backend_settings_expose"
+      - name: Install every optional backend
+        run: pip install -e ".[dev,faiss,qdrant,openai]" -c constraints-dev.txt
+      - name: Prove the extras landed
+        # pip accepts an extra that does not exist without a word, which would
+        # leave the gate below on its "names the missing extra" branch.
+        run: python -c "import faiss, qdrant_client, openai"
+      - name: Every advertised backend constructs
+        # Node ids, not `-k`: a selection exits 5 only when nothing matches, so
+        # deleting one of two selected gates still exits 0.
+        run: |
+          python -B -m pytest -q \
+            tests/test_app.py::test_every_permitted_backend_starts_or_names_its_missing_extra \
+            tests/test_app.py::test_the_backend_settings_expose_the_values_this_file_checks
 
   iac:
     runs-on: ubuntu-latest

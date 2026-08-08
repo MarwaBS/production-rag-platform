@@ -408,7 +408,7 @@ def _permitted(field: str) -> tuple[str, ...]:
     """The values a backend setting accepts, read from its own annotation.
 
     A hand-written list here would not cover the next value added to the
-    Literal, which is how `faiss` came to be advertised and never exercised.
+    Literal.
     """
     from typing import get_args
 
@@ -428,8 +428,7 @@ def test_the_backend_settings_expose_the_values_this_file_checks() -> None:
 @pytest.mark.parametrize(
     "field,value",
     [
-        # The embedding backends have no constructor to call; `test_embedder.py`
-        # holds them to dispatch, boot refusal and the no-embedder refusal.
+        # Embedding backends have no constructor; test_embedder.py holds them.
         (field, value)
         for field in ("llm_backend", "vector_backend")
         for value in _permitted(field)
@@ -438,24 +437,25 @@ def test_the_backend_settings_expose_the_values_this_file_checks() -> None:
 def test_every_permitted_backend_starts_or_names_its_missing_extra(
     field: str, value: str
 ) -> None:
-    """Each Literal value must construct, or boot must refuse with the install
-    hint. Reaching neither is how `faiss` came to be advertised and never
-    exercised."""
+    """Each Literal value must construct the backend it names, or boot must
+    refuse naming that backend's own extra. Reaching neither leaves a value
+    selectable and never exercised."""
     from app.config import Settings
 
     settings = Settings.model_validate({field: value})
     try:
         main._require_backend_packages(settings)
     except RuntimeError as missing:
-        assert "production-rag-platform[" in str(missing), str(missing)
+        assert f"production-rag-platform[{value}]" in str(missing), str(missing)
         return
-    if field == "vector_backend":
-        assert main.get_vector_store(value).backend_name
-    else:
-        assert main.get_llm(value).backend_name
+    factory = main.get_vector_store if field == "vector_backend" else main.get_llm
+    # A factory ignoring its argument satisfies a bare `assert .backend_name`.
+    assert factory(value).backend_name == value
 
 
-def test_pyproject_declares_every_nondefault_backend_extra() -> None:
+def test_pyproject_declares_every_nondefault_backend_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Every selectable non-default backend must be pip-installable via an extra,
     so the boot guard's `pip install …[extra]` hint actually resolves. Read off
     config.py: a hand-written list here cannot cover the next value added."""
@@ -471,20 +471,19 @@ def test_pyproject_declares_every_nondefault_backend_extra() -> None:
         r"\[project\.optional-dependencies\]\n((?:.*\n)+?)\n?\[", pyproject
     )
     assert extras_block, "expected an optional-dependencies table"
+    # Read the hint from the guard, not from what this environment installed.
+    monkeypatch.setattr(main.importlib.util, "find_spec", lambda name: None)
     checked = 0
     for field in ("llm_backend", "vector_backend", "embedding_backend"):
         for value in _permitted(field):
             if value == Settings.model_fields[field].default:
                 continue
             checked += 1
-            try:
+            with pytest.raises(RuntimeError) as refused:
                 main._require_backend_packages(Settings.model_validate({field: value}))
-            except RuntimeError as missing:
-                # The extra the operator is actually told to install. It equals
-                # the backend's own name today, and nothing makes it.
-                extra = str(missing).split("production-rag-platform[")[1].split("]")[0]
-            else:
-                extra = value
+            extra = (
+                str(refused.value).split("production-rag-platform[")[1].split("]")[0]
+            )
             assert re.search(rf"(?m)^{re.escape(extra)}\s*=", extras_block.group(1)), (
                 f"backend '{extra}' is selectable in config.py but has no install extra"
             )

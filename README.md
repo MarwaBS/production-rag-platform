@@ -161,7 +161,10 @@ so a retrieval regression fails the build) · a separate **`semantic` job** that
 sentence-transformers extra and runs the paraphrase floors, which the default word-matching embedder cannot
 satisfy — that job's only test step is [`scripts/check_semantic_report.py`](scripts/check_semantic_report.py), which
 starts the run itself into a directory it creates and fails the build unless every semantic gate appears in the
-report that run wrote as having passed · `helm lint` + `helm template`
+report that run wrote as having passed · a separate **`backends` job** that installs the faiss,
+qdrant and openai extras, proves each one actually imported (pip accepts an extra that does not
+exist without a word) and requires every advertised backend to construct rather than only name the
+extra it is missing · `helm lint` + `helm template`
 render (defaults **and** every opt-in template, so the ingress, TLS and monitoring manifests are
 rendered rather than shipped unseen) · `hadolint` on the Dockerfile · Docker image build · the built
 image **started, with `/health`, `/index` and `/query` exercised against it**, so a broken `CMD` or a

@@ -37,6 +37,7 @@ CONFIG = REPO / "pyproject.toml"
 MANIFEST = frozenset(
     {
         ".dockerignore",
+        ".github/dependabot.yml",
         ".github/workflows/ci.yml",
         ".gitignore",
         "LICENSE",

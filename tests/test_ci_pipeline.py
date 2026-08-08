@@ -29,9 +29,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # assertion below can be an equality rather than a search.
 PROVE_SEMANTIC = "python -B -m scripts.check_semantic_report"
 PROVE_SUITE = "python -B -m scripts.check_suite_report"
-# The selection is what makes the backends job a gate; a bare pytest invocation
-# is not distinctive enough to key on.
-PROVE_BACKENDS = '-k "permitted_backend or backend_settings_expose"'
+PROVE_BACKENDS = (
+    "tests/test_app.py::test_every_permitted_backend_starts_or_names_its_missing_extra"
+)
 
 
 def _ci() -> Dict[Any, Any]:
@@ -525,16 +525,23 @@ PIPELINE_STEPS = {
         (None, "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065", ()),
         (None, None, ("python -m pip install --upgrade pip",)),
         (
-            "Install with the optional vector backends",
+            "Install every optional backend",
             None,
-            ('pip install -e ".[dev,faiss,qdrant]" -c constraints-dev.txt',),
+            ('pip install -e ".[dev,faiss,qdrant,openai]" -c constraints-dev.txt',),
         ),
         (
-            "faiss and qdrant construct instead of only naming their extra",
+            "Prove the extras landed",
+            None,
+            ('python -c "import faiss, qdrant_client, openai"',),
+        ),
+        (
+            "Every advertised backend constructs",
             None,
             (
-                "python -B -m pytest tests/test_app.py -q "
-                '-k "permitted_backend or backend_settings_expose"',
+                "python -B -m pytest -q \\",
+                f"{PROVE_BACKENDS} \\",
+                "tests/test_app.py::"
+                "test_the_backend_settings_expose_the_values_this_file_checks",
             ),
         ),
     ),
@@ -803,9 +810,7 @@ def test_every_action_the_readme_advertises_is_present_and_can_fail() -> None:
         # the first produced, and every read below takes the first.
         assert len(steps) == 1, (name, len(steps))
         for step in steps:
-            # A commit, not a tag. `v0.36.0` reads exact but is still a tag, and
-            # a publisher can move it; only a SHA cannot be repointed. The
-            # trailing comment carries the human-readable version.
+            # A commit, not a tag: an exact version tag is still movable.
             assert re.fullmatch(r"[0-9a-f]{40}", step["uses"].split("@")[1]), step
             assert set(step["with"]) <= vetted, set(step["with"]) - vetted
     scan = _action(workflow, "aquasecurity/trivy-action")[0]["with"]
@@ -876,8 +881,10 @@ def test_the_readme_names_the_jobs_the_publish_actually_waits_on() -> None:
     jobs = _ci()["jobs"]
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     sentence = next(
-        line for line in readme.splitlines() if "The image publish waits on" in line
+        (line for line in readme.splitlines() if "The image publish waits on" in line),
+        "",
     )
+    assert sentence, "README no longer carries the wait-list sentence"
     named = {job for job in jobs if re.search(rf"\b{re.escape(job)}\b", sentence, re.I)}
     assert named == set(jobs["docker"]["needs"]), (named, jobs["docker"]["needs"])
 

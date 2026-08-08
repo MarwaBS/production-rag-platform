@@ -544,9 +544,13 @@ def test_the_suite_checker_runs_the_whole_suite_under_the_coverage_floor() -> No
 
 
 def test_the_readme_sells_the_floor_the_gate_enforces() -> None:
-    """The constant and the README sentence must carry the same number, and
-    nothing else reads that sentence."""
+    """The constant and the README sentence must carry the same number."""
+    import re
+
     from scripts.check_suite_report import COVERAGE_FLOOR
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert f"{COVERAGE_FLOOR}% coverage floor" in readme, COVERAGE_FLOOR
+    # `an?` for the article (an 85, a 93); the anchor stops 93 matching in 193.
+    assert re.search(rf"under an? {COVERAGE_FLOOR}% coverage floor", readme), (
+        COVERAGE_FLOOR
+    )
