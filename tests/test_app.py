@@ -404,19 +404,55 @@ def test_index_and_query_emit_count_logs(caplog) -> None:
     )
 
 
-def test_nondefault_backend_without_extra_fails_fast() -> None:
-    """A selected non-default backend whose package isn't installed must fail at
-    STARTUP with the exact install hint — not defer to a 500 on the first /query.
-    openai/faiss/qdrant are optional extras; the base/dev env installs none of
-    them, so selecting one here must raise a clear RuntimeError."""
+def _permitted(field: str) -> tuple[str, ...]:
+    """The values a backend setting accepts, read from its own annotation.
+
+    A hand-written list here would not cover the next value added to the
+    Literal, which is how `faiss` came to be advertised and never exercised.
+    """
+    from typing import get_args
+
     from app.config import Settings
 
-    with pytest.raises(RuntimeError, match=r"production-rag-platform\[openai\]"):
-        main._require_backend_packages(Settings(llm_backend="openai"))
-    with pytest.raises(RuntimeError, match=r"production-rag-platform\[qdrant\]"):
-        main._require_backend_packages(Settings(vector_backend="qdrant"))
-    # The default stack (mock LLM + numpy store) is always available — no raise.
-    main._require_backend_packages(Settings())
+    return get_args(Settings.model_fields[field].annotation)
+
+
+def test_the_backend_settings_expose_the_values_this_file_checks() -> None:
+    """Non-vacuity: an empty tuple would make the parametrised test below run
+    zero cases and still report green."""
+    assert _permitted("vector_backend") == ("numpy", "faiss", "qdrant")
+    assert _permitted("llm_backend") == ("mock", "openai")
+    assert _permitted("embedding_backend") == ("hash", "semantic")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        (field, value)
+        for field in ("llm_backend", "vector_backend", "embedding_backend")
+        for value in _permitted(field)
+    ],
+)
+def test_every_permitted_backend_starts_or_names_its_missing_extra(
+    field: str, value: str
+) -> None:
+    """Each Literal value is a promise the config makes to an operator.
+
+    A value must either boot, or refuse with the exact install hint. Anything
+    else is the promise failing in a way nothing catches: `rag-llm-infra` 0.2
+    rejects the `get_vector_store` call this service makes for qdrant, which
+    would surface as ValueError here rather than the guard's RuntimeError.
+    """
+    from app.config import Settings
+
+    settings = Settings.model_validate({field: value})
+    try:
+        main._require_backend_packages(settings)
+    except RuntimeError as missing:
+        assert "production-rag-platform[" in str(missing), str(missing)
+        return
+    if field == "vector_backend":
+        assert main._build_store(settings).backend_name
 
 
 def test_pyproject_declares_every_nondefault_backend_extra() -> None:

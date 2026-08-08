@@ -24,8 +24,9 @@ from scripts.gate_report import Runner, keyed, prove, tracked_test_files
 # this key would not match it. The suite holds itself to the form this reads.
 _DEFINED = re.compile(r"^def (test_\w+)", re.MULTILINE)
 
-# The floor the README sells, unchanged since it was set below the measurement.
-COVERAGE_FLOOR = "85"
+# The floor the README sells. Measured 98.11%; 93 leaves 16 statements of
+# headroom, about one new uncovered function, before the gate trips.
+COVERAGE_FLOOR = "93"
 
 
 def defined_tests() -> Set[str]:

@@ -534,7 +534,7 @@ def test_the_suite_checker_runs_the_whole_suite_under_the_coverage_floor() -> No
     argv = _pytest_command(report)
     assert argv[0] == sys.executable and argv[2] == "pytest", argv
     options = argv[3:]
-    assert "--cov=app" in options and "--cov-fail-under=85" in options, argv
+    assert "--cov=app" in options and "--cov-fail-under=93" in options, argv
     assert f"--junitxml={report}" in options, argv
     assert "-m" not in options, argv
     # Autoload is off for the run, so what it measures with has to be named,

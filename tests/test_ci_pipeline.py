@@ -512,6 +512,24 @@ PIPELINE_STEPS = {
             (PROVE_SEMANTIC,),
         ),
     ),
+    "backends": (
+        (None, "actions/checkout@v4", ()),
+        (None, "actions/setup-python@v5", ()),
+        (None, None, ("python -m pip install --upgrade pip",)),
+        (
+            "Install with the optional vector backends",
+            None,
+            ('pip install -e ".[dev,faiss,qdrant]" -c constraints-dev.txt',),
+        ),
+        (
+            "Every advertised backend actually constructs",
+            None,
+            (
+                "python -B -m pytest tests/test_app.py -q "
+                '-k "permitted_backend or backend_settings_expose"',
+            ),
+        ),
+    ),
     "iac": (
         (None, "actions/checkout@v4", ()),
         (None, "azure/setup-helm@v4", ()),
