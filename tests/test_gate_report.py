@@ -534,10 +534,23 @@ def test_the_suite_checker_runs_the_whole_suite_under_the_coverage_floor() -> No
     argv = _pytest_command(report)
     assert argv[0] == sys.executable and argv[2] == "pytest", argv
     options = argv[3:]
-    assert "--cov=app" in options and "--cov-fail-under=85" in options, argv
+    assert "--cov=app" in options and "--cov-fail-under=93" in options, argv
     assert f"--junitxml={report}" in options, argv
     assert "-m" not in options, argv
     # Autoload is off for the run, so what it measures with has to be named,
     # and so does the file its settings come from.
     assert options[options.index("-p") + 1] == "pytest_cov", argv
     assert options[options.index("-c") + 1] == "pyproject.toml", argv
+
+
+def test_the_readme_sells_the_floor_the_gate_enforces() -> None:
+    """The constant and the README sentence must carry the same number."""
+    import re
+
+    from scripts.check_suite_report import COVERAGE_FLOOR
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    # `an?` for the article (an 85, a 93); the anchor stops 93 matching in 193.
+    assert re.search(rf"under an? {COVERAGE_FLOOR}% coverage floor", readme), (
+        COVERAGE_FLOOR
+    )

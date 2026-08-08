@@ -404,27 +404,65 @@ def test_index_and_query_emit_count_logs(caplog) -> None:
     )
 
 
-def test_nondefault_backend_without_extra_fails_fast() -> None:
-    """A selected non-default backend whose package isn't installed must fail at
-    STARTUP with the exact install hint — not defer to a 500 on the first /query.
-    openai/faiss/qdrant are optional extras; the base/dev env installs none of
-    them, so selecting one here must raise a clear RuntimeError."""
+def _permitted(field: str) -> tuple[str, ...]:
+    """The values a backend setting accepts, read from its own annotation.
+
+    A hand-written list here would not cover the next value added to the
+    Literal.
+    """
+    from typing import get_args
+
     from app.config import Settings
 
-    with pytest.raises(RuntimeError, match=r"production-rag-platform\[openai\]"):
-        main._require_backend_packages(Settings(llm_backend="openai"))
-    with pytest.raises(RuntimeError, match=r"production-rag-platform\[qdrant\]"):
-        main._require_backend_packages(Settings(vector_backend="qdrant"))
-    # The default stack (mock LLM + numpy store) is always available — no raise.
-    main._require_backend_packages(Settings())
+    return get_args(Settings.model_fields[field].annotation)
 
 
-def test_pyproject_declares_every_nondefault_backend_extra() -> None:
+def test_the_backend_settings_expose_the_values_this_file_checks() -> None:
+    """Pins the advertised set, so adding a backend is a deliberate act and the
+    parametrised test below cannot silently run zero cases."""
+    assert _permitted("vector_backend") == ("numpy", "faiss", "qdrant")
+    assert _permitted("llm_backend") == ("mock", "openai")
+    assert _permitted("embedding_backend") == ("hash", "semantic")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        # Embedding backends have no constructor; test_embedder.py holds them.
+        (field, value)
+        for field in ("llm_backend", "vector_backend")
+        for value in _permitted(field)
+    ],
+)
+def test_every_permitted_backend_starts_or_names_its_missing_extra(
+    field: str, value: str
+) -> None:
+    """Each Literal value must construct the backend it names, or boot must
+    refuse naming that backend's own extra. Reaching neither leaves a value
+    selectable and never exercised."""
+    from app.config import Settings
+
+    settings = Settings.model_validate({field: value})
+    try:
+        main._require_backend_packages(settings)
+    except RuntimeError as missing:
+        assert f"production-rag-platform[{value}]" in str(missing), str(missing)
+        return
+    factory = main.get_vector_store if field == "vector_backend" else main.get_llm
+    # A factory ignoring its argument satisfies a bare `assert .backend_name`.
+    assert factory(value).backend_name == value
+
+
+def test_pyproject_declares_every_nondefault_backend_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Every selectable non-default backend must be pip-installable via an extra,
-    so the boot guard's `pip install …[extra]` hint actually resolves. Guards
-    against config.py offering a backend with no way to install its package."""
+    so the boot guard's `pip install …[extra]` hint actually resolves. Read off
+    config.py: a hand-written list here cannot cover the next value added."""
     import pathlib
     import re
+
+    from app.config import Settings
 
     pyproject = (
         pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml"
@@ -433,10 +471,23 @@ def test_pyproject_declares_every_nondefault_backend_extra() -> None:
         r"\[project\.optional-dependencies\]\n((?:.*\n)+?)\n?\[", pyproject
     )
     assert extras_block, "expected an optional-dependencies table"
-    for extra in ("openai", "faiss", "qdrant", "semantic"):
-        assert re.search(rf"(?m)^{extra}\s*=", extras_block.group(1)), (
-            f"backend '{extra}' is selectable in config.py but has no install extra"
-        )
+    # Read the hint from the guard, not from what this environment installed.
+    monkeypatch.setattr(main.importlib.util, "find_spec", lambda name: None)
+    checked = 0
+    for field in ("llm_backend", "vector_backend", "embedding_backend"):
+        for value in _permitted(field):
+            if value == Settings.model_fields[field].default:
+                continue
+            checked += 1
+            with pytest.raises(RuntimeError) as refused:
+                main._require_backend_packages(Settings.model_validate({field: value}))
+            extra = (
+                str(refused.value).split("production-rag-platform[")[1].split("]")[0]
+            )
+            assert re.search(rf"(?m)^{re.escape(extra)}\s*=", extras_block.group(1)), (
+                f"backend '{extra}' is selectable in config.py but has no install extra"
+            )
+    assert checked, "no non-default backend derived"
 
 
 # Names the same capability goes by elsewhere in the README, so an abbreviation

@@ -29,6 +29,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # assertion below can be an equality rather than a search.
 PROVE_SEMANTIC = "python -B -m scripts.check_semantic_report"
 PROVE_SUITE = "python -B -m scripts.check_suite_report"
+PROVE_BACKENDS = (
+    "tests/test_app.py::test_every_permitted_backend_starts_or_names_its_missing_extra"
+)
 
 
 def _ci() -> Dict[Any, Any]:
@@ -455,6 +458,7 @@ ADVERTISED_COMMANDS = (
     # The coverage floor moved into the checker below with the run it fails on,
     # and is pinned where it now lives.
     PROVE_SUITE,
+    PROVE_BACKENDS,
     "python -m evals",
     "helm lint",
     "helm template",
@@ -469,8 +473,8 @@ ADVERTISED_COMMANDS = (
 # away: a shim earlier on PATH, a variable exported into every later step.
 PIPELINE_STEPS = {
     "test": (
-        (None, "actions/checkout@v4", ()),
-        (None, "actions/setup-python@v5", ()),
+        (None, "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", ()),
+        (None, "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065", ()),
         (None, None, ("python -m pip install --upgrade pip",)),
         (
             "Install (pulls rag-llm-infra from PyPI; dev toolchain pinned)",
@@ -497,9 +501,13 @@ PIPELINE_STEPS = {
         ),
     ),
     "semantic": (
-        (None, "actions/checkout@v4", ()),
-        (None, "actions/setup-python@v5", ()),
-        ("Cache the embedding model", "actions/cache@v4", ()),
+        (None, "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", ()),
+        (None, "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065", ()),
+        (
+            "Cache the embedding model",
+            "actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830",
+            (),
+        ),
         (None, None, ("python -m pip install --upgrade pip",)),
         (
             "Install with the semantic extra",
@@ -512,9 +520,34 @@ PIPELINE_STEPS = {
             (PROVE_SEMANTIC,),
         ),
     ),
+    "backends": (
+        (None, "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", ()),
+        (None, "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065", ()),
+        (None, None, ("python -m pip install --upgrade pip",)),
+        (
+            "Install every optional backend",
+            None,
+            ('pip install -e ".[dev,faiss,qdrant,openai]" -c constraints-dev.txt',),
+        ),
+        (
+            "Prove the extras landed",
+            None,
+            ('python -c "import faiss, qdrant_client, openai"',),
+        ),
+        (
+            "Every advertised backend constructs",
+            None,
+            (
+                "python -B -m pytest -q \\",
+                f"{PROVE_BACKENDS} \\",
+                "tests/test_app.py::"
+                "test_the_backend_settings_expose_the_values_this_file_checks",
+            ),
+        ),
+    ),
     "iac": (
-        (None, "actions/checkout@v4", ()),
-        (None, "azure/setup-helm@v4", ()),
+        (None, "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", ()),
+        (None, "azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4", ()),
         (
             "Helm lint + render (defaults, then every opt-in template)",
             None,
@@ -529,19 +562,27 @@ PIPELINE_STEPS = {
                 "--set secrets.data.APP_API_KEY=c2VjcmV0 > /dev/null",
             ),
         ),
-        ("Lint Dockerfile (hadolint)", "hadolint/hadolint-action@v3.1.0", ()),
+        (
+            "Lint Dockerfile (hadolint)",
+            "hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf",
+            (),
+        ),
     ),
     "docker": (
-        (None, "actions/checkout@v4", ()),
-        ("Set up Buildx", "docker/setup-buildx-action@v3", ()),
+        (None, "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", ()),
+        (
+            "Set up Buildx",
+            "docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f",
+            (),
+        ),
         (
             "Build image (load locally for scan + SBOM)",
-            "docker/build-push-action@v6",
+            "docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8",
             (),
         ),
         (
             "Trivy image scan (fail on fixable HIGH/CRITICAL)",
-            "aquasecurity/trivy-action@v0.36.0",
+            "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25",
             (),
         ),
         (
@@ -562,7 +603,11 @@ PIPELINE_STEPS = {
                 "docker rm -f smoke",
             ),
         ),
-        ("Generate CycloneDX SBOM", "anchore/sbom-action@v0.24.0", ()),
+        (
+            "Generate CycloneDX SBOM",
+            "anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610",
+            (),
+        ),
         (
             "Check the SBOM inventories the image",
             None,
@@ -573,8 +618,16 @@ PIPELINE_STEPS = {
                 'echo "SBOM inventories $components components"',
             ),
         ),
-        ("Upload SBOM artifact", "actions/upload-artifact@v4.6.2", ()),
-        ("Log in to GHCR", "docker/login-action@v3", ()),
+        (
+            "Upload SBOM artifact",
+            "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+            (),
+        ),
+        (
+            "Log in to GHCR",
+            "docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9",
+            (),
+        ),
         (
             "Read chart appVersion (the tag a bare `helm install` resolves)",
             None,
@@ -757,10 +810,8 @@ def test_every_action_the_readme_advertises_is_present_and_can_fail() -> None:
         # the first produced, and every read below takes the first.
         assert len(steps) == 1, (name, len(steps))
         for step in steps:
-            # An exact version, so a re-pointed tag cannot change the verdict
-            # without changing this file. The actions not listed here float on
-            # major tags: their inputs are pinned above, their code is not.
-            assert re.fullmatch(r"v\d+\.\d+\.\d+", step["uses"].split("@")[1]), step
+            # A commit, not a tag: an exact version tag is still movable.
+            assert re.fullmatch(r"[0-9a-f]{40}", step["uses"].split("@")[1]), step
             assert set(step["with"]) <= vetted, set(step["with"]) - vetted
     scan = _action(workflow, "aquasecurity/trivy-action")[0]["with"]
     # The values, not just the keys: os-only drops every library CVE, and
@@ -822,6 +873,20 @@ def test_the_publish_waits_on_every_other_job() -> None:
     """Waiting on some of them publishes while the rest are still failing."""
     jobs = _ci()["jobs"]
     assert set(jobs["docker"]["needs"]) == set(jobs) - {"docker"}, jobs["docker"]
+
+
+def test_the_readme_names_the_jobs_the_publish_actually_waits_on() -> None:
+    """That sentence is the only prose copy of the wait list. Names, not count:
+    a swap keeps the count."""
+    jobs = _ci()["jobs"]
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    sentence = next(
+        (line for line in readme.splitlines() if "The image publish waits on" in line),
+        "",
+    )
+    assert sentence, "README no longer carries the wait-list sentence"
+    named = {job for job in jobs if re.search(rf"\b{re.escape(job)}\b", sentence, re.I)}
+    assert named == set(jobs["docker"]["needs"]), (named, jobs["docker"]["needs"])
 
 
 def test_no_gate_step_is_conditional_and_publishing_comes_last() -> None:

@@ -46,3 +46,12 @@ def test_a_missing_semantic_package_refuses_to_boot_with_the_fix(
     with pytest.raises(RuntimeError, match=r"production-rag-platform\[semantic\]"):
         main._require_backend_packages(Settings(embedding_backend="semantic"))
     main._require_backend_packages(Settings())  # default stack: no raise
+
+
+def test_a_backend_with_no_embedder_is_refused_not_hashed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Silently hashing it would leave retrieval degraded and the run green."""
+    monkeypatch.setattr(embedder._settings, "embedding_backend", "cohere")
+    with pytest.raises(ValueError, match="cohere"):
+        embedder.embed(["anything"])
