@@ -1,6 +1,6 @@
 ## What this is
 
-A deployable reference RAG service that constrains every generated answer to the caller's own retrieved documents; served behind a typed API and shipped with the full production envelope: containerized, Kubernetes-deployable, observable, CI-gated.
+A deployable reference RAG service that builds every answer from the caller's own retrieved documents and nothing else. That is a constraint on what the model is given, not a check on what it returns: nothing here verifies the answer against the evidence, and the `grounded` field says so. Served behind a typed API and shipped with the full production envelope: containerized, Kubernetes-deployable, observable, CI-gated.
 
 **[Open infrastructure: rag-llm-infra](https://pypi.org/project/rag-llm-infra/)**; the published package this service runs on. A separate private product is built on the same design; the boundary table below says which parts run here.
 
