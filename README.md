@@ -64,8 +64,10 @@ The runnable `app/` service:
 
 - `POST /index` — build a vector store from documents and swap it in atomically
   (corpus-replace).
-- `POST /query` — retrieve top-k and generate a grounded answer (Mock LLM by
-  default, or OpenAI via `APP_LLM_BACKEND=openai`).
+- `POST /query` — retrieve top-k and answer from those windows (Mock LLM by
+  default, or OpenAI via `APP_LLM_BACKEND=openai`). The `grounded` field reports
+  that evidence was retrieved and used, not that the answer was checked against
+  it; the route's own description says so.
 - **Auth** — when `APP_API_KEY` is set, both `/index` and `/query` require a
   matching `X-API-Key` header (the data-plane: corpus writes and reads/LLM
   spend). The probes `/health`, `/ready`, `/metrics` stay open. Unset by
