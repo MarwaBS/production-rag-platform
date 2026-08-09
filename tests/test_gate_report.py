@@ -16,6 +16,8 @@ from typing import Any, Dict, List
 
 import pytest
 
+from scripts.gate_report import SUBPROCESS_TIMEOUT_S
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -50,6 +52,7 @@ def _collected(*selection: str) -> set[str]:
         capture_output=True,
         text=True,
         cwd=str(ROOT),
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
     assert listing.returncode == 0, listing.stdout[-400:]
     return {

@@ -20,7 +20,7 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
-from scripts.gate_report import PYTEST_CONFIG
+from scripts.gate_report import PYTEST_CONFIG, SUBPROCESS_TIMEOUT_S
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -56,6 +56,7 @@ TOOL_CONFIG = {
         "python_version": "3.12",
         "warn_unused_configs": True,
         "check_untyped_defs": True,
+        "warn_unused_ignores": True,
         "overrides": [
             {
                 "module": ["sentence_transformers.*"],
@@ -177,6 +178,7 @@ def _tracked(pattern: str) -> List[str]:
         capture_output=True,
         text=True,
         cwd=str(ROOT),
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
     return [name for name in listing.stdout.split("\0") if name]
 
@@ -234,6 +236,7 @@ def test_the_linter_opens_every_python_file_the_repo_tracks() -> None:
         capture_output=True,
         text=True,
         cwd=str(ROOT),
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
     assert listed.returncode == 0, listed.stderr[-400:]
     examined = {
@@ -242,7 +245,11 @@ def test_the_linter_opens_every_python_file_the_repo_tracks() -> None:
         if line.strip()
     }
     tracked = subprocess.run(
-        ["git", "ls-files", "-z", "*.py"], capture_output=True, text=True, cwd=str(ROOT)
+        ["git", "ls-files", "-z", "*.py"],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
     expected = {(ROOT / name).resolve() for name in tracked.stdout.split("\0") if name}
     assert expected, "fixture: git listed no tracked python files"
@@ -265,6 +272,7 @@ def test_the_type_checker_still_reports_an_error_under_the_config_it_resolves() 
             capture_output=True,
             text=True,
             cwd=str(ROOT),
+            timeout=SUBPROCESS_TIMEOUT_S,
         )
     assert judged.returncode != 0, judged.stdout[-400:]
     assert "return-value" in judged.stdout, judged.stdout[-400:]
@@ -291,6 +299,7 @@ def test_every_tracked_test_file_is_collected() -> None:
         capture_output=True,
         text=True,
         cwd=str(ROOT),
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
     expected = {path for path in tracked.stdout.split(chr(0)) if path}
     assert expected, "fixture: git listed no tracked test files"
@@ -299,6 +308,7 @@ def test_every_tracked_test_file_is_collected() -> None:
         capture_output=True,
         text=True,
         cwd=str(ROOT),
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
     assert collected.returncode == 0, collected.stdout[-400:]
     seen = {
@@ -335,7 +345,11 @@ def test_ci_type_checks_every_directory_that_ships_python() -> None:
     assert invocation, "no run line invokes mypy"
     checked = {argument for line in invocation for argument in line.split()[1:]}
     tracked = subprocess.run(
-        ["git", "ls-files", "-z", "*.py"], capture_output=True, text=True, cwd=str(ROOT)
+        ["git", "ls-files", "-z", "*.py"],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
     shipping = _top_level(tracked.stdout)
     assert shipping, "fixture: git listed no tracked python files"

@@ -15,6 +15,8 @@ from fastapi.testclient import TestClient
 import app.main as main
 from app.main import app
 
+from scripts.gate_report import SUBPROCESS_TIMEOUT_S
+
 client = TestClient(app)
 
 
@@ -722,6 +724,7 @@ def test_uvicorn_reroute_happens_at_import_not_only_lifespan() -> None:
         text=True,
         env=env,
         cwd=str(pathlib.Path(__file__).resolve().parent.parent),
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
     assert proc.returncode == 0, f"child failed:\n{proc.stderr}"
     result = json.loads(proc.stdout.strip().splitlines()[-1])

@@ -14,6 +14,8 @@ import pytest
 
 from app.config import Settings
 
+from scripts.gate_report import SUBPROCESS_TIMEOUT_S
+
 
 def test_production_without_an_api_key_refuses_to_start() -> None:
     with pytest.raises(Exception, match="API_KEY"):
@@ -90,6 +92,7 @@ def test_production_does_not_serve_the_interactive_docs() -> None:
         text=True,
         env=env,
         cwd=str(pathlib.Path(__file__).resolve().parent.parent),
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
     assert proc.returncode == 0, f"child failed:\n{proc.stderr}"
     mounted = json.loads(proc.stdout.strip().splitlines()[-1])
@@ -104,3 +107,37 @@ def test_development_keeps_the_interactive_docs() -> None:
     from app.main import app
 
     assert "/docs" in {getattr(route, "path", "") for route in app.routes}
+
+
+def test_every_subprocess_call_is_bounded_by_a_timeout() -> None:
+    """A child with no deadline hangs the job to its six-hour ceiling.
+
+    All fourteen call sites here were unbounded, so this is a fix and a floor
+    at once. Read from the parse tree, because the spawn can be spelled
+    `subprocess.run`, `check_output` or `Popen`.
+    """
+    import ast
+    import pathlib
+    import subprocess
+
+    from scripts.gate_report import SUBPROCESS_TIMEOUT_S
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+
+    assert SUBPROCESS_TIMEOUT_S > 0, SUBPROCESS_TIMEOUT_S
+    listing = subprocess.run(
+        ["git", "ls-files", "-z", "*.py"],
+        capture_output=True,
+        text=True,
+        cwd=str(root),
+        timeout=SUBPROCESS_TIMEOUT_S,
+    )
+    spawns = {"subprocess.run", "subprocess.check_output", "subprocess.Popen"}
+    unbounded = []
+    for name in [n for n in listing.stdout.split("\0") if n]:
+        tree = ast.parse((root / name).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and ast.unparse(node.func) in spawns:
+                if not any(word.arg == "timeout" for word in node.keywords):
+                    unbounded.append(f"{name}:{node.lineno}")
+    assert not unbounded, unbounded

@@ -16,6 +16,8 @@ import sys
 
 import pytest
 
+from scripts.gate_report import SUBPROCESS_TIMEOUT_S
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -38,6 +40,7 @@ def test_the_scale_curve_reproduces_through_the_serving_path() -> None:
         capture_output=True,
         text=True,
         cwd=str(ROOT),
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
     assert rerun.returncode == 0, f"the producer failed: {rerun.stderr[-400:]}"
     assert json.loads(rerun.stdout) == _committed(), (

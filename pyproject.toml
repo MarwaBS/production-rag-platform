@@ -59,6 +59,9 @@ warn_unused_configs = true
 # Off by default, and a function with no annotation anywhere is then a body
 # nothing judges; a waiver that leaves neither a directive nor a decorator.
 check_untyped_defs = true
+# A `type: ignore` that stopped suppressing anything still reads as a live
+# waiver and hides the next real error on that line.
+warn_unused_ignores = true
 
 # sentence-transformers is an optional extra the type-check environment does not
 # install. Scoped to it alone: rag-llm-infra ships py.typed from 0.2, so every

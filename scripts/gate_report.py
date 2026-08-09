@@ -108,6 +108,14 @@ _OTHER_SETTINGS = ("pytest.ini", ".pytest.ini", "tox.ini", "setup.cfg")
 # What the file the command does name has to say. Read here and not by a test,
 # because what a settings file loads through `-p` is a plugin, holding the
 # position a conftest holds, over the suite that test would have been in.
+# Every child this repo spawns, bounded. Measured warm: git ls-files 0.0s, ruff
+# 0.1s, the chunking producer 0.1s, the scale producer 6.5s, pytest --collect-only
+# 6.8s, the semantic floor producer 9.8s. 900 leaves room for a cold model
+# download and still turns a hung child into a failure rather than a job that
+# burns its six-hour ceiling.
+SUBPROCESS_TIMEOUT_S = 900
+
+
 PYTEST_CONFIG = {
     "addopts": "-ra -m 'not semantic'",
     "markers": [
@@ -177,6 +185,7 @@ def _git(*arguments: str, stdin: str = "") -> str:
         capture_output=True,
         text=True,
         cwd=str(REPO),
+        timeout=SUBPROCESS_TIMEOUT_S,
     ).stdout
 
 
