@@ -1,8 +1,8 @@
 version: 2
 updates:
   # The actions are pinned to commit SHAs, so nothing updates them on its own.
-  # Each bump arrives as a PR that fails the pipeline signature test until the
-  # pin there is updated too, which is the review the pinning exists for.
+  # A bump changes only the ref: the tests pin which action each step runs and
+  # that the ref is a commit, so a routine bump needs no test edit.
   - package-ecosystem: github-actions
     directory: /
     schedule:

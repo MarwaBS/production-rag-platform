@@ -473,8 +473,8 @@ ADVERTISED_COMMANDS = (
 # away: a shim earlier on PATH, a variable exported into every later step.
 PIPELINE_STEPS = {
     "test": (
-        (None, "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", ()),
-        (None, "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065", ()),
+        (None, "actions/checkout", ()),
+        (None, "actions/setup-python", ()),
         (None, None, ("python -m pip install --upgrade pip",)),
         (
             "Install (pulls rag-llm-infra from PyPI; dev toolchain pinned)",
@@ -501,11 +501,11 @@ PIPELINE_STEPS = {
         ),
     ),
     "semantic": (
-        (None, "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", ()),
-        (None, "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065", ()),
+        (None, "actions/checkout", ()),
+        (None, "actions/setup-python", ()),
         (
             "Cache the embedding model",
-            "actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830",
+            "actions/cache",
             (),
         ),
         (None, None, ("python -m pip install --upgrade pip",)),
@@ -521,8 +521,8 @@ PIPELINE_STEPS = {
         ),
     ),
     "backends": (
-        (None, "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", ()),
-        (None, "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065", ()),
+        (None, "actions/checkout", ()),
+        (None, "actions/setup-python", ()),
         (None, None, ("python -m pip install --upgrade pip",)),
         (
             "Install every optional backend",
@@ -546,8 +546,8 @@ PIPELINE_STEPS = {
         ),
     ),
     "iac": (
-        (None, "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", ()),
-        (None, "azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4", ()),
+        (None, "actions/checkout", ()),
+        (None, "azure/setup-helm", ()),
         (
             "Helm lint + render (defaults, then every opt-in template)",
             None,
@@ -564,25 +564,25 @@ PIPELINE_STEPS = {
         ),
         (
             "Lint Dockerfile (hadolint)",
-            "hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf",
+            "hadolint/hadolint-action",
             (),
         ),
     ),
     "docker": (
-        (None, "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", ()),
+        (None, "actions/checkout", ()),
         (
             "Set up Buildx",
-            "docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f",
+            "docker/setup-buildx-action",
             (),
         ),
         (
             "Build image (load locally for scan + SBOM)",
-            "docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8",
+            "docker/build-push-action",
             (),
         ),
         (
             "Trivy image scan (fail on fixable HIGH/CRITICAL)",
-            "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25",
+            "aquasecurity/trivy-action",
             (),
         ),
         (
@@ -605,7 +605,7 @@ PIPELINE_STEPS = {
         ),
         (
             "Generate CycloneDX SBOM",
-            "anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610",
+            "anchore/sbom-action",
             (),
         ),
         (
@@ -620,12 +620,12 @@ PIPELINE_STEPS = {
         ),
         (
             "Upload SBOM artifact",
-            "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+            "actions/upload-artifact",
             (),
         ),
         (
             "Log in to GHCR",
-            "docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9",
+            "docker/login-action",
             (),
         ),
         (
@@ -758,15 +758,30 @@ def _conditional_gates(workflow: Dict[Any, Any]) -> List[Dict[str, Any]]:
 
 
 def _signature(step: Dict[str, Any]) -> Any:
+    uses = step.get("uses")
     return (
         step.get("name"),
-        # The version too: the action name alone leaves a re-pointed or bumped
-        # ref free to change what the step does with the file untouched.
-        step.get("uses") or None,
+        # Which action, not which commit of it. Pinning the ref here turned
+        # every dependabot bump into a failure someone had to hand-patch, and
+        # that the ref is a commit at all is gated across the file below.
+        uses.split("@")[0] if uses else None,
         tuple(
             line.strip() for line in _uncommented(step.get("run", "")) if line.strip()
         ),
     )
+
+
+def test_every_action_is_pinned_to_a_commit() -> None:
+    """A tag is movable whether or not it reads exact, and this covers all of
+    them: the README names only some, and the step list above no longer carries
+    the ref."""
+    floating = [
+        step["uses"]
+        for step in _steps(_ci())
+        if step.get("uses")
+        and not re.fullmatch(r"[0-9a-f]{40}", step["uses"].partition("@")[2])
+    ]
+    assert not floating, floating
 
 
 def test_the_pipeline_runs_these_steps_and_no_others() -> None:
