@@ -23,6 +23,8 @@ import app.main as main
 from app.config import Settings
 from app.main import app
 
+from scripts.gate_report import SUBPROCESS_TIMEOUT_S
+
 client = TestClient(app)
 
 MAX_CHARS = 100
@@ -254,6 +256,7 @@ def test_the_shipped_overlap_is_wide_enough_for_the_sentence_it_guarantees() -> 
         capture_output=True,
         text=True,
         cwd=str(root),
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
     assert rerun.returncode == 0, f"the producer failed: {rerun.stderr[-400:]}"
     assert json.loads(rerun.stdout) == json.loads(

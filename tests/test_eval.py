@@ -17,6 +17,8 @@ import pytest
 import evals.harness as harness
 from evals.harness import evaluate
 
+from scripts.gate_report import SUBPROCESS_TIMEOUT_S
+
 _DERIVATION = json.loads(
     (
         pathlib.Path(__file__).resolve().parent.parent / "eval_floors_derivation.json"
@@ -164,6 +166,7 @@ def test_the_floor_derivation_reproduces_under_the_semantic_backend() -> None:
         capture_output=True,
         text=True,
         cwd=str(root),
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
     assert rerun.returncode == 0, f"the producer failed: {rerun.stderr[-400:]}"
     assert json.loads(rerun.stdout) == json.loads(
