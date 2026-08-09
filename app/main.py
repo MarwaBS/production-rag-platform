@@ -519,6 +519,14 @@ def index(req: IndexRequest, _: None = Depends(require_api_key)) -> Dict[str, in
 
 @app.post("/query")
 def query(req: QueryRequest, _: None = Depends(require_api_key)) -> Any:
+    """Retrieve the top-k windows and answer from them.
+
+    `grounded` reports whether evidence was retrieved and used, not whether the
+    answer was checked against it: true once retrieval scored above zero and the
+    model answered from a prompt carrying those windows, false when the query
+    shares nothing with the corpus. Nothing here reads the answer back, so a
+    model that invents a claim while holding good evidence still returns true.
+    """
     _REQUESTS.labels("query").inc()
     start = time.perf_counter()
     # Observe latency on EVERY exit path (success, 409, or a raised error) in a

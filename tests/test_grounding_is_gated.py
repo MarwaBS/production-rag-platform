@@ -107,3 +107,12 @@ def test_the_answer_differs_when_the_evidence_differs() -> None:
     assert len(set(answers.values())) == len(answers), (
         f"both corpora produced the same answer: {answers}"
     )
+
+
+def test_the_route_description_says_what_grounded_does_not_mean() -> None:
+    """`grounded` is true on every answered query, so the name alone reads as a
+    check on the answer. The README points a reader at this description."""
+    description = " ".join(
+        app.openapi()["paths"]["/query"]["post"]["description"].split()
+    )
+    assert "not whether the answer was checked against it" in description, description
