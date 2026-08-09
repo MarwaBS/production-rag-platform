@@ -18,7 +18,7 @@ from .config import get_settings
 
 # Chosen, not derived: a hash embedder trades collisions against vector width
 # and nothing here fixes the number. What that choice costs is NOT measured in
-# this repo — the recorded curve holds the width constant across both arms.
+# this repo; the recorded curve holds the width constant across both arms.
 _DIM = 128
 _settings = get_settings()
 _semantic_model: Any = None

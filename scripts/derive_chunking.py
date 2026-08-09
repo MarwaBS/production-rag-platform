@@ -5,7 +5,7 @@
 model's 256-token limit less the two special tokens it adds, at one wordpiece
 per character. Those three constants are literals here so this reproduces with
 no model installed; a semantic-marked gate holds them against the real
-tokenizer. The assumption bounds text whose characters cost a wordpiece each —
+tokenizer. The assumption bounds text whose characters cost a wordpiece each;
 scripts that cost more per character can still overflow the limit.
 
 Run: python scripts/derive_chunking.py            # rewrite the committed file
@@ -21,7 +21,8 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from evals.harness import CORPUS  # noqa: E402 — needs the repo root on sys.path
+# Imported after the sys.path insert above: it needs the repo root.
+from evals.harness import CORPUS  # noqa: E402
 
 
 def _sentences(document: str) -> list[str]:

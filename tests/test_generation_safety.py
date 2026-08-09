@@ -1,8 +1,8 @@
 """The model call is bounded, and what reaches the prompt is treated as data.
 
 Two independent risks meet at the same line of code. Retrieved text is attacker-
-controlled — anyone who can write to the corpus can write "ignore your
-instructions" — so it must arrive delimited and labelled as data. And the
+controlled; anyone who can write to the corpus can write "ignore your
+instructions"; so it must arrive delimited and labelled as data. And the
 provider is a network dependency inside a synchronous route, so an unbounded call
 holds a threadpool worker until the client gives up.
 
@@ -65,7 +65,7 @@ def llm(monkeypatch):
     yield _install
     main._index = None
     # The breaker is process-global, so an open one left here fails every later
-    # file. Required as soon as the breaker exists — an optional cleanup is one
+    # file. Required as soon as the breaker exists; an optional cleanup is one
     # that silently stops running.
     reset = getattr(main, "reset_llm_breaker", None)
     if hasattr(main.settings, "llm_breaker_failures"):
@@ -80,7 +80,7 @@ def llm(monkeypatch):
 def test_retrieved_text_is_delimited_as_data(llm) -> None:
     """Every occurrence of the evidence must sit inside the delimiters.
 
-    A copy outside them — a summary line, a repeated header — is exactly the
+    A copy outside them (a summary line, a repeated header) is exactly the
     undelimited instruction the delimiters exist to contain.
     """
     import re
@@ -227,7 +227,7 @@ def test_retries_are_bounded(llm) -> None:
 def test_timeouts_count_toward_the_breaker_and_are_not_retried(
     llm, monkeypatch
 ) -> None:
-    """A hang is one spent attempt — retrying it holds the worker for a second
+    """A hang is one spent attempt; retrying it holds the worker for a second
     timeout window. And consecutive hangs must open the breaker, or a hanging
     provider is paid the full timeout on every request forever."""
     monkeypatch.setattr(main.settings, "llm_timeout_seconds", 0.05)
@@ -238,7 +238,7 @@ def test_timeouts_count_toward_the_breaker_and_are_not_retried(
             client.post("/query", json={"query": "vectors", "k": 1}).status_code == 503
         )
     assert fake.calls == threshold, (
-        "a timed-out attempt was retried — the worker is held for two windows"
+        "a timed-out attempt was retried; the worker is held for two windows"
     )
     response = client.post("/query", json={"query": "vectors", "k": 1})
     assert response.status_code == 503
@@ -281,7 +281,7 @@ def test_a_document_retrieval_did_not_return_never_reaches_the_model(llm) -> Non
     Delimiting, the untrusted-content instruction and the answer checks are all
     about what retrieval SELECTED. If the prompt is built from the corpus instead,
     each of them still holds while the model reads documents the query never
-    matched — the retrieval step becomes decoration.
+    matched; the retrieval step becomes decoration.
     """
     fake = llm()
     main._index = None

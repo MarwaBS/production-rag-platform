@@ -32,7 +32,7 @@ spec:
           # no privilege escalation, an immutable root filesystem, and all Linux
           # capabilities dropped. The app writes nothing to the root fs (in-memory
           # NumPy store, stdout logging), so /tmp is the only writable mount it
-          # needs — backed by an emptyDir below.
+          # needs; backed by an emptyDir below.
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -52,7 +52,7 @@ spec:
                 optional: true
           env:
             # Render every key under .Values.env (sorted, so the output is
-            # deterministic) — hardcoding a single key here is how ENV=prod
+            # deterministic); hardcoding a single key here is how ENV=prod
             # (the rag-llm-infra JSON-log switch) silently never shipped.
             {{- range $name, $value := .Values.env }}
             - name: {{ $name }}
@@ -67,7 +67,7 @@ spec:
           # /index call that makes it ready. /ready is an app-level signal for
           # clients to poll, exposed by the API but intentionally not the probe.
           # Explicit probe timing: the cluster default is a 1s timeout, which a
-          # pod busy with a full-size legal request can exceed — timing must be
+          # pod busy with a full-size legal request can exceed; timing must be
           # a stated decision, not an inherited default.
           readinessProbe:
             httpGet:

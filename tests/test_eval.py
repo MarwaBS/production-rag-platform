@@ -3,7 +3,7 @@
 The floors come from scripts/derive_eval_floors.py (semantic backend on the
 paraphrase set, the one non-saturated baseline). The default hash path is gated
 against floors derived from its own literal-set measurement, at the same half a
-miss of margin — its own bar, not this one.
+miss of margin; its own bar, not this one.
 """
 
 from __future__ import annotations
@@ -74,14 +74,14 @@ def test_the_default_embedder_cannot_match_a_paraphrase() -> None:
     capability, and this keeps the floor from implying semantic retrieval."""
     result = evaluate(k=3, queries=_paraphrased())
     assert result.recall_at_k < RECALL_AT_3_FLOOR, (
-        "the default embedder now clears the paraphrase floor — if the semantic "
+        "the default embedder now clears the paraphrase floor; if the semantic "
         "backend became the default, this limitation note is stale"
     )
 
 
 @pytest.mark.semantic
 def test_retrieval_meets_every_floor_on_paraphrased_queries(monkeypatch) -> None:
-    """The floors, asked of meaning rather than of vocabulary — the measurement
+    """The floors, asked of meaning rather than of vocabulary; the measurement
     they were derived from. Selects the semantic backend itself, so the gate
     cannot silently run against the hash path."""
     import app.embedder as embedder
@@ -151,7 +151,7 @@ def test_the_floors_are_derived_from_a_committed_measured_baseline() -> None:
 
 @pytest.mark.semantic
 def test_the_floor_derivation_reproduces_under_the_semantic_backend() -> None:
-    """The producer must regenerate the committed derivation exactly — an
+    """The producer must regenerate the committed derivation exactly; an
     artefact nobody can regenerate is a number someone typed."""
     import json
     import pathlib

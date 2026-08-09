@@ -81,7 +81,7 @@ def test_query_409_path_is_observed_in_latency_histogram() -> None:
         return REGISTRY.get_sample_value("rag_query_latency_seconds_count") or 0.0
 
     before = _count()
-    r = client.post("/query", json={"query": "anything"})  # 409 — no index
+    r = client.post("/query", json={"query": "anything"})  # 409; no index
     assert r.status_code == 409
     assert _count() == before + 1.0, (
         "409 path must be recorded in the latency histogram"
@@ -133,7 +133,7 @@ def _corpus(n: int) -> list[str]:
 
     Ranking matters to what this test can detect. If every document scores the
     same, the store returns ties in ascending index order, so the top hit is
-    always index 0 — which is in range for any corpus, and a query that read a
+    always index 0; which is in range for any corpus, and a query that read a
     larger store than its document list would still find something to return.
     Weighting the match toward the end makes the returned index large, so pairing
     a big store with a small document list resolves out of range instead.
@@ -143,8 +143,8 @@ def _corpus(n: int) -> list[str]:
 
 def test_concurrent_reindex_and_query_never_5xx() -> None:
     # Exercises the two paths against each other under real threads. It cannot
-    # guarantee it lands in the one-bytecode window a torn publish would open —
-    # the structural check below is what proves that window does not exist — so
+    # guarantee it lands in the one-bytecode window a torn publish would open;
+    # the structural check below is what proves that window does not exist; so
     # what this rules out is the broader class: a handler that errors when the
     # corpus changes size beneath it.
     # raise_server_exceptions=False so a handler error becomes a 500 this thread
@@ -207,7 +207,7 @@ def test_index_requires_api_key_when_configured(monkeypatch) -> None:
         ).status_code
         == 401
     )
-    # A non-ASCII guess must be a clean 401, not a 500 — the constant-time
+    # A non-ASCII guess must be a clean 401, not a 500; the constant-time
     # comparison encodes to bytes precisely so compare_digest can't raise on it.
     # (Sent as raw bytes: httpx itself only allows ASCII in str header values.)
     assert (
@@ -228,11 +228,11 @@ def test_index_requires_api_key_when_configured(monkeypatch) -> None:
 
 def test_query_requires_api_key_when_configured(monkeypatch) -> None:
     """When APP_API_KEY is set, /query (a read that touches the corpus and
-    spends LLM budget) must require the key too — not only the destructive
+    spends LLM budget) must require the key too; not only the destructive
     /index write. A shared deployment that guards /index but leaves /query open
     lets anyone read the indexed corpus and burn the LLM allowance."""
     monkeypatch.setattr(main.settings, "api_key", "s3cret")
-    # Seed a corpus (with the key) so a served /query would be a 200 — proving
+    # Seed a corpus (with the key) so a served /query would be a 200; proving
     # the 401 below is auth, not the empty-index 409.
     assert (
         client.post(
@@ -268,14 +268,14 @@ def test_api_key_comparison_is_constant_time() -> None:
     """The key comparison in app/main.py must go through secrets.compare_digest.
 
     SCOPE, stated because it bounds what this can promise: the walk starts at
-    the guard and follows BARE-NAME calls — `helper(...)` — whose name it can
+    the guard and follows BARE-NAME calls (`helper(...)`) whose name it can
     look up DIRECTLY IN THE MODULE NAMESPACE and find a function defined in
     app/main.py. That is all it follows. A comparison reached any other way is
     outside it: through an attribute (`obj.helper(...)`, a bound method, a
     module alias), through a locally rebound name (`check = helper` then
-    `check(...)` — the lookup sees no `check` on the module), or in another
-    module. The limit is deliberate — resolving arbitrary call graphs is not a
-    test's job — and it is stated so the gate never promises coverage it lacks.
+    `check(...)`; the lookup sees no `check` on the module), or in another
+    module. The limit is deliberate; resolving arbitrary call graphs is not a
+    test's job; and it is stated so the gate never promises coverage it lacks.
 
     The body is parsed with the docstring removed, because reading raw source
     would let the prose describing the property satisfy the check for it.
@@ -334,7 +334,7 @@ def test_api_key_comparison_is_constant_time() -> None:
 
     # The digest comparison must be somewhere on the reachable path. Demanding it
     # sit in a particular `if` would reject a correct helper that returns its
-    # result — the very refactor this walk exists to allow.
+    # result; the very refactor this walk exists to allow.
     assert [
         node
         for node in ast.walk(tree)
@@ -386,7 +386,7 @@ def test_startup_emits_structured_config_summary(caplog) -> None:
 
 
 def test_index_and_query_emit_count_logs(caplog) -> None:
-    """Both write and read paths must leave an INFO trail (counts only — never
+    """Both write and read paths must leave an INFO trail (counts only; never
     document/query content)."""
     import logging
 
@@ -509,8 +509,8 @@ def test_readme_hook_claims_only_tech_that_runs_here() -> None:
     The banned set is read out of the boundary table, so a capability added there
     is covered without anyone remembering to extend a list here.
 
-    LIMITATION: this is name-based. It flags the words the table uses — Redis,
-    arq, OTel — and a paraphrase that never says them ("hot answers served from
+    LIMITATION: this is name-based. It flags the words the table uses. Redis,
+    arq, OTel; and a paraphrase that never says them ("hot answers served from
     an in-memory store") passes. It catches drift, not deliberate rewording.
     """
     import pathlib
@@ -557,7 +557,7 @@ def test_default_helm_image_tag_is_published_by_ci() -> None:
     The Deployment falls back to the chart's appVersion when image.tag is empty,
     so if CI publishes only :latest and :<sha> that default install references a
     tag GHCR does not have and the pod cannot pull. Both halves are read with
-    comments stripped, and the CI half is matched inside the loop that pushes —
+    comments stripped, and the CI half is matched inside the loop that pushes;
     a mention anywhere else in the file is not a push.
     """
     import pathlib
@@ -603,7 +603,7 @@ def test_default_helm_ingress_is_disabled() -> None:
     assert ingress_block, "expected an ingress: block in values.yaml"
     enabled = re.search(r"^\s+enabled:\s*(\S+)", ingress_block.group(1), flags=re.M)
     assert enabled and enabled.group(1) == "false", (
-        "ingress must default to disabled — a default-on Ingress publishes the "
+        "ingress must default to disabled; a default-on Ingress publishes the "
         "unauthenticated data-plane to the internet"
     )
     template = (root / "deploy" / "helm" / "templates" / "ingress.yaml").read_text()
@@ -615,7 +615,7 @@ def test_default_helm_ingress_is_disabled() -> None:
 def test_helm_deploy_activates_json_logging() -> None:
     """rag-llm-infra keys its JSON formatter on ENV=prod, which is a different
     knob from the app's own APP_ENV. The values must carry both, and the
-    template must render every key under .Values.env — setting only APP_ENV
+    template must render every key under .Values.env; setting only APP_ENV
     leaves the shipped deploy emitting human-readable logs."""
     import pathlib
     import re
@@ -693,7 +693,7 @@ def test_uvicorn_loggers_emit_json_under_prod(monkeypatch) -> None:
 def test_uvicorn_reroute_happens_at_import_not_only_lifespan() -> None:
     """Under ENV=prod the reroute must run at import, not only in the lifespan.
 
-    uvicorn configures logging, imports the app, then logs its two boot banners —
+    uvicorn configures logging, imports the app, then logs its two boot banners;
     so a lifespan-only reroute leaves those first lines in plain text. Runs in a
     subprocess because re-importing app.main re-registers its Prometheus
     collectors.
@@ -710,7 +710,7 @@ def test_uvicorn_reroute_happens_at_import_not_only_lifespan() -> None:
         "logging.config.dictConfig(uc.LOGGING_CONFIG)  # uvicorn's plain handlers, as at boot\n"
         "uv = logging.getLogger('uvicorn')\n"
         "assert uv.handlers and uv.propagate is False  # precondition: owns plain handler, no root propagation\n"
-        "import app.main  # noqa: F401 — the import-time reroute must fire here\n"
+        "import app.main  # noqa: F401; the import-time reroute must fire here\n"
         "print(json.dumps({'propagate': uv.propagate, 'handlers': len(uv.handlers)}))\n"
     )
     # The probe key keeps the production boot refusal out of this test's way;
@@ -788,7 +788,7 @@ def test_the_index_is_published_and_read_in_one_step() -> None:
     """The snapshot invariant, checked structurally rather than by racing.
 
     A thread test can only catch an interleave it happens to hit, and the window
-    between two writes is a single bytecode wide — the concurrency test above
+    between two writes is a single bytecode wide; the concurrency test above
     exercises the paths but cannot be relied on to land inside it. What makes the
     torn read impossible is the shape of the code: one name, published in one
     assignment, read once per request. That is checkable exactly.

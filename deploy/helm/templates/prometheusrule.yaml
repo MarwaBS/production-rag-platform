@@ -1,5 +1,5 @@
 {{- /* Same CRD dependency as the ServiceMonitor, same opt-in guard. Every
-       series referenced here is registered in app/main.py — a test pins that,
+       series referenced here is registered in app/main.py; a test pins that,
        so an alert can never watch a metric the app does not export. */}}
 {{- if .Values.monitoring.enabled }}
 apiVersion: monitoring.coreos.com/v1
@@ -14,7 +14,7 @@ spec:
       rules:
         - alert: RagAnswersNothing
           # Queries are arriving and every one comes back ungrounded: the
-          # service is up, serving, and useless — the exact state /health
+          # service is up, serving, and useless; the exact state /health
           # cannot see.
           expr: >-
             increase(rag_unanswered_total[15m]) > 0

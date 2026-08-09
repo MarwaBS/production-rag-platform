@@ -32,7 +32,7 @@ def _reset():
 
 def test_the_corpus_gauge_tracks_the_indexed_documents() -> None:
     """/index REPLACES the corpus, so the gauge must follow it down as well as
-    up — a counter here would silently misreport every re-index."""
+    up; a counter here would silently misreport every re-index."""
     client.post("/index", json={"documents": ["gauge doc one", "gauge doc two"]})
     assert sample("rag_corpus_documents") == 2.0
     client.post("/index", json={"documents": ["solo gauge doc"]})

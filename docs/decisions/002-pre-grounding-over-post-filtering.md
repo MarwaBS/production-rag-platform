@@ -1,8 +1,8 @@
-# ADR 002 — Pre-grounding over post-filtering
+# ADR 002. Pre-grounding over post-filtering
 
 **Status:** Accepted
 
-**Scope:** the pre-grounding decision is implemented in this repo — `/query` retrieves first
+**Scope:** the pre-grounding decision is implemented in this repo; `/query` retrieves first
 and builds the prompt from the retrieved windows alone. The post-generation check named under
 Trade-off is **full system only**; nothing in `app/` inspects an answer after the model returns it.
 
@@ -25,5 +25,5 @@ is well worth the faithfulness guarantee.
 
 In the full system a lightweight post-generation check runs behind this as a safety net. This
 repo ships no such check: what it enforces instead is that generation cannot proceed without
-evidence — a query that retrieves nothing scoring above zero is answered `grounded: false`
+evidence; a query that retrieves nothing scoring above zero is answered `grounded: false`
 with no model call at all.

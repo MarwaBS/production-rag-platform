@@ -14,7 +14,7 @@ the caller for a limit of the service.
 
 The failure these prevent: a zero-norm query is renormalised by the vector store
 rather than rejected, so every similarity is 0.0 and the top-k is an arbitrary
-slice of the corpus — which the service then presents as evidence.
+slice of the corpus; which the service then presents as evidence.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ CORPUS = [
 
 # The demo embedder keeps only [a-z0-9]+ tokens, so each of these embeds to the
 # zero vector: no similarity it produces means anything. Whitespace-only text
-# belongs here with the rest — it is a valid string carrying no signal, which is
+# belongs here with the rest; it is a valid string carrying no signal, which is
 # the system's limit to report, not the caller's error to be blamed for.
 UNREPRESENTABLE = ["日本語のクエリ", "   ", "\t\n", "!!!", "…—–", "Кириллица", "→←↑↓"]
 
@@ -129,14 +129,14 @@ def test_hits_are_ordered_by_descending_score(spy) -> None:
     assert len(scores) == 2, f"expected both documents to match, got {scores}"
     assert scores == sorted(scores, reverse=True), scores
     # The query shares two words with the FAISS document and one with the
-    # Prometheus document, so their similarities cannot be equal — a constant
+    # Prometheus document, so their similarities cannot be equal; a constant
     # "score" satisfies range and ordering checks while auditing nothing.
     assert scores[0] > scores[1], (
         "two documents of different relevance carry the same score, so the "
         "score is a constant, not a similarity"
     )
     assert body["retrieved"][0]["text"] == CORPUS[0], (
-        "the less relevant document outranked the more relevant one — the "
+        "the less relevant document outranked the more relevant one; the "
         "surfaced number is not the similarity that ordered the hits"
     )
 
@@ -146,7 +146,8 @@ def test_ids_are_stable_across_requests_and_re_indexing(spy) -> None:
 
     Otherwise it identifies a response, not a document.
     """
-    ask = lambda: client.post(  # noqa: E731 — two identical calls, read as one
+    # A lambda so the two identical calls below read as one.
+    ask = lambda: client.post(  # noqa: E731
         "/query", json={"query": "vector similarity search", "k": 1}
     ).json()["retrieved"][0]
 
@@ -167,7 +168,7 @@ def test_ids_are_stable_across_requests_and_re_indexing(spy) -> None:
 
     # Re-index a SUPERSET whose new document sorts before every existing one
     # (a leading digit precedes letters in any collation) and sits first in the
-    # submitted list. Reversal alone is survived by a canonicalised position —
+    # submitted list. Reversal alone is survived by a canonicalised position;
     # the index in the SORTED corpus. Growth shifts every position, raw or
     # canonical, so only an id derived from the content itself holds still.
     main._index = None
@@ -187,7 +188,7 @@ def test_ids_are_stable_across_requests_and_re_indexing(spy) -> None:
 def test_the_refusal_tracks_the_embedding_not_the_characters(spy, monkeypatch) -> None:
     """The guard consults what the embedder PRODUCED, not what the query
     looks like. A character heuristic agrees with the norm check on every query
-    in UNREPRESENTABLE — and silently diverges the day a backend that can
+    in UNREPRESENTABLE; it silently diverges the day a backend that can
     represent them lands. Steering the embedder directly separates the two.
     """
     import numpy as np
@@ -201,7 +202,7 @@ def test_the_refusal_tracks_the_embedding_not_the_characters(spy, monkeypatch) -
     monkeypatch.setattr(main, "embed", zero_for_vectors)
     body = client.post("/query", json={"query": "vectors", "k": 1}).json()
     assert body["grounded"] is False and body["retrieved"] == [], (
-        "the embedding was zero yet the query was served — the guard reads the "
+        "the embedding was zero yet the query was served; the guard reads the "
         "characters, not the embedding"
     )
     assert spy.searches == 0
@@ -222,7 +223,7 @@ def test_a_query_the_embedder_represents_is_served_whatever_its_script(
     monkeypatch.setattr(main, "embed", represent_cjk)
     client.post("/query", json={"query": "日本語のクエリ", "k": 1})
     assert spy.searches == 1, (
-        "the embedding carried signal yet the store was never consulted — the "
+        "the embedding carried signal yet the store was never consulted; the "
         "guard is a character filter, not an embedding check"
     )
 

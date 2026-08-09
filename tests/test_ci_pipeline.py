@@ -3,7 +3,7 @@
 These read the workflow file; they do not run it. What they establish is that
 the file describes exactly the steps below and no others. What no reading of the
 file can establish is that the runner behaved, or that the tools those steps
-invoke behave as their names suggest — only the pipeline executing does that,
+invoke behave as their names suggest; only the pipeline executing does that,
 which is why the deploy-posture file makes the same trade.
 """
 
@@ -198,7 +198,7 @@ def _suppressions() -> Dict[str, Any]:
 
 
 def test_every_spelling_a_gate_accepts_is_one_this_reader_matches() -> None:
-    """Both of these are honoured — the linter takes the waiver in either case,
+    """Both of these are honoured; the linter takes the waiver in either case,
     and coverage takes the pragma with the colon left out. Neither shows up in
     the pinned set unless the patterns above are as wide as the tools are."""
     # Built rather than written out: a waiver spelled here would be a waiver
@@ -227,7 +227,7 @@ def test_the_linter_opens_every_python_file_the_repo_tracks() -> None:
     """Pinning a config section proves what it says, not what the file list the
     run walks turns out to be: a file dropped from that list is one `ruff check
     .` reports nothing about. Ask ruff for the list. What this does not answer
-    is whether every file on it is judged — a per-file ignore leaves a file
+    is whether every file on it is judged; a per-file ignore leaves a file
     listed and unjudged, which is why the config sections are pinned too."""
     listed = subprocess.run(
         [sys.executable, "-m", "ruff", "check", ".", "--show-files"],
@@ -362,7 +362,7 @@ def _unvetted_keys(workflow: Dict[Any, Any], job: Dict[str, Any]) -> List[str]:
     problems += [f"job: {key}" for key in job if key not in JOB_KEYS]
     # Job-level env reaches every step in the job and is strictly stronger than
     # the step-level form refused below. It cannot touch the checker's own run,
-    # which is handed a built environment — it reaches the steps beside it.
+    # which is handed a built environment; it reaches the steps beside it.
     problems += [
         f"job env: {key}" for key in job.get("env") or {} if key not in JOB_ENV
     ]
@@ -404,7 +404,7 @@ def test_ci_is_triggered_by_the_events_that_deliver_code() -> None:
 
 
 def test_the_key_check_refuses_every_key_it_has_not_read() -> None:
-    """It returns nothing on the shipped file — which is also what a check
+    """It returns nothing on the shipped file; which is also what a check
     looking for keys that cannot occur returns. Each of these neuters a gate
     without touching its run line, and none had to be foreseen."""
     clean: Dict[str, Any] = {"steps": [{"run": PROVE_SEMANTIC}]}
@@ -688,7 +688,7 @@ ADVERTISED_STEPS = (
 
 # Every input every action may carry. Restricting only the scanners left the
 # builder free to publish a different stage, and checkout free to fetch a
-# different tree — neither needs a key anyone had thought to forbid.
+# different tree; neither needs a key anyone had thought to forbid.
 ACTION_INPUTS = {
     "actions/checkout": set(),
     "actions/setup-python": {"python-version"},
@@ -775,7 +775,7 @@ def _gate_steps(workflow: Dict[Any, Any]) -> List[Dict[str, Any]]:
 
 
 def _conditional_gates(workflow: Dict[Any, Any]) -> List[Dict[str, Any]]:
-    """Advertised gates wearing the merge condition — how one leaves the set
+    """Advertised gates wearing the merge condition; how one leaves the set
     above while remaining the thing the README sells."""
     return [s for s in _steps(workflow) if s.get("if") and _advertised(s)]
 
@@ -823,7 +823,7 @@ def test_the_pipeline_runs_these_steps_and_no_others() -> None:
 
 def test_every_step_the_readme_sells_as_a_gate_is_one_of_them() -> None:
     """The pinned list above is what runs; this is which of it the README sells
-    — and a name occurring twice would make the pinning ambiguous."""
+    ; and a name occurring twice would make the pinning ambiguous."""
     pinned = [step for steps in PIPELINE_STEPS.values() for step in steps]
     names = [name for name, _, _ in pinned if name]
     assert len(names) == len(set(names)), sorted(names)
@@ -931,7 +931,7 @@ def test_no_gate_step_is_conditional_and_publishing_comes_last() -> None:
     """A condition on a gate is invisible in a green run: the step is skipped,
     not failed. Publishing is rightly conditional, so the conditional steps must
     be the tail of their job and carry the one condition that means this is a
-    merge — and every gate must be unconditional, which is what puts it before
+    merge; and every gate must be unconditional, which is what puts it before
     them. Position alone does not: a gate that is also conditional sits happily
     in that tail, running after the image it was meant to vet has been pushed."""
     workflow = _ci()

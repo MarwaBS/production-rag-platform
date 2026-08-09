@@ -68,7 +68,7 @@ def test_a_word_wider_than_the_window_is_split_rather_than_dropped() -> None:
 @pytest.mark.parametrize("length", [160, 220, 280])
 def test_a_length_landing_on_a_boundary_emits_no_redundant_tail(length: int) -> None:
     """Off by one, the stop test appends a final window wholly inside the one
-    before it — an extra vector and a duplicate hit for the same text."""
+    before it; an extra vector and a duplicate hit for the same text."""
     text = "".join(chr(0x100 + position) for position in range(length))
     pieces = chunk(text, max_chars=MAX_CHARS, overlap_chars=OVERLAP)
     assert not any(
@@ -161,7 +161,7 @@ def _windows_of(document: str) -> list[str]:
 
 def test_retrieval_returns_the_window_that_carries_the_answer() -> None:
     """The retrieval unit must BE a window the splitter produced. Anything
-    weaker — a short string, a slice containing the answer — is satisfied by
+    weaker (a short string, a slice containing the answer) is satisfied by
     slicing the document, which loses everything not on the slice."""
     document = _multi_window_document()
     windows = _windows_of(document)
@@ -170,7 +170,7 @@ def test_retrieval_returns_the_window_that_carries_the_answer() -> None:
     body = client.post("/index", json={"documents": [document]}).json()
     assert body["chunks"] == len(windows)
     hits = client.post("/query", json={"query": _MARKER, "k": 1}).json()["retrieved"]
-    # Every window's ordinal must name its position, not merely be unique — one
+    # Every window's ordinal must name its position, not merely be unique; one
     # hit cannot show that, since a middle window survives being reversed.
     everything = client.post(
         "/query", json={"query": "padding", "k": len(windows)}
@@ -187,7 +187,7 @@ def test_retrieval_returns_the_window_that_carries_the_answer() -> None:
 def test_the_window_that_matched_is_the_window_that_was_embedded() -> None:
     """Texts and vectors are two sequences joined by position alone. Reverse one
     of them and every hit still names the text it carries, so nothing inside a
-    hit shows it — only asking for a phrase that lives in one window, and one
+    hit shows it; only asking for a phrase that lives in one window, and one
     that does not map to itself when the order is turned around."""
     document = _multi_window_document()
     windows = _windows_of(document)
@@ -229,7 +229,7 @@ def test_the_shipped_overlap_is_wide_enough_for_the_sentence_it_guarantees() -> 
 
     What this checks is that the number is REPRODUCIBLE: a committed producer
     regenerates the artefact exactly. It cannot check that the producer measured
-    anything rather than printing a literal — that is what reading the producer
+    anything rather than printing a literal; that is what reading the producer
     is for.
     """
     import json
@@ -300,7 +300,7 @@ def test_the_shipped_constants_carry_a_sentence_of_the_measured_length() -> None
 
 def test_the_producer_measures_sentences_rather_than_documents() -> None:
     """The overlap guarantee is stated per sentence. Every line of the present
-    corpus is one, so the artefact cannot tell the two apart — the split can."""
+    corpus is one, so the artefact cannot tell the two apart; the split can."""
     from scripts.derive_chunking import _sentences
 
     # Leading and trailing whitespace, and all three terminators: the split

@@ -2,7 +2,7 @@
 
 This is the repository's headline claim, and it is the one with no gate: the
 default answer is assembled from `len(retrieved)`, so removing the context from
-the prompt — or the instruction that constrains the model to it — changes
+the prompt (or the instruction that constrains the model to it) changes
 nothing observable. An answer that would read identically for a different corpus
 is not grounded in that corpus, whatever the sentence says.
 """

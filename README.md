@@ -1,8 +1,8 @@
 ## What this is
 
-A deployable reference RAG service that constrains every generated answer to the caller's own retrieved documents — served behind a typed API and shipped with the full production envelope: containerized, Kubernetes-deployable, observable, CI-gated.
+A deployable reference RAG service that constrains every generated answer to the caller's own retrieved documents; served behind a typed API and shipped with the full production envelope: containerized, Kubernetes-deployable, observable, CI-gated.
 
-**[Open infrastructure: rag-llm-infra](https://pypi.org/project/rag-llm-infra/)** — the published package this service runs on. A separate private product is built on the same design; the boundary table below says which parts run here.
+**[Open infrastructure: rag-llm-infra](https://pypi.org/project/rag-llm-infra/)**; the published package this service runs on. A separate private product is built on the same design; the boundary table below says which parts run here.
 
 Stack: FastAPI · rag-llm-infra · NumPy retrieval (FAISS/Qdrant optional) · Prometheus · structured JSON logs · Docker · Kubernetes/Helm · GitHub Actions
 
@@ -21,7 +21,7 @@ Stack: FastAPI · rag-llm-infra · NumPy retrieval (FAISS/Qdrant optional) · Pr
 ![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub_Actions-2088FF?logo=githubactions&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 
-**Evidence-grounded LLM generation, built as a production service — not a notebook.**
+**Evidence-grounded LLM generation, built as a production service; not a notebook.**
 
 A retrieval-augmented generation platform that constrains generation to the user's own
 retrieved documents, served behind a typed API with full production infrastructure:
@@ -30,7 +30,7 @@ verified: what is gated here is that the retrieved evidence reaches the prompt, 
 prompt holds the model to it, and that the answer changes when the evidence changes.
 Checking a generated claim against that evidence is the private system's job.
 
-> **What runs here vs. what's design context** — the one thing to get straight:
+> **What runs here vs. what's design context**; the one thing to get straight:
 >
 > | | Runs in this repo (`app/`) | Design context only |
 > |---|---|---|
@@ -41,7 +41,7 @@ Checking a generated claim against that evidence is the private system's job.
 > Sections below are labelled _"full system"_ when they describe the private architecture, so you
 > can always tell what executes here from what's design context.
 
-**Run it in 30 seconds** — [jump to quickstart](#run-the-reference-service).
+**Run it in 30 seconds**; [jump to quickstart](#run-the-reference-service).
 
 ## Run the reference service
 
@@ -62,27 +62,27 @@ Runs on the NumPy vector store + Mock LLM with no API key. Set `APP_LLM_BACKEND=
 
 The runnable `app/` service:
 
-- `POST /index` — build a vector store from documents and swap it in atomically
+- `POST /index`: build a vector store from documents and swap it in atomically
   (corpus-replace).
-- `POST /query` — retrieve top-k and answer from those windows (Mock LLM by
+- `POST /query`: retrieve top-k and answer from those windows (Mock LLM by
   default, or OpenAI via `APP_LLM_BACKEND=openai`). The `grounded` field reports
   that evidence was retrieved and used, not that the answer was checked against
   it; the route's own description says so.
-- **Auth** — when `APP_API_KEY` is set, both `/index` and `/query` require a
+- **Auth**: when `APP_API_KEY` is set, both `/index` and `/query` require a
   matching `X-API-Key` header (the data-plane: corpus writes and reads/LLM
   spend). The probes `/health`, `/ready`, `/metrics` stay open. Unset by
   default for the no-auth local/demo run.
-- `GET /health` — liveness · `GET /ready` — app-level "is a corpus indexed?"
-  (503 until indexed) · `GET /metrics` — Prometheus.
+- `GET /health`: liveness · `GET /ready`: app-level "is a corpus indexed?"
+  (503 until indexed) · `GET /metrics`. Prometheus.
 - Typed config (pydantic-settings, validated), structured logging, input
   validation, single-replica Helm chart, multi-stage non-root Docker image.
 
 Two retrieval choices, both defaulting to the dependency-free option:
 
-- **Vector store** — NumPy by default; `faiss` / `qdrant` via extras.
-- **Embedder** — a 128-dimension token-count hash by default (`APP_EMBEDDING_BACKEND=hash`).
+- **Vector store**: NumPy by default; `faiss` / `qdrant` via extras.
+- **Embedder**: a 128-dimension token-count hash by default (`APP_EMBEDDING_BACKEND=hash`).
   It matches **words, not meaning**, so it retrieves few paraphrases that share no token
-  with their document, and recall falls as the corpus grows — both measured, in
+  with their document, and recall falls as the corpus grows; both measured, in
   [eval_floors_derivation.json](eval_floors_derivation.json) and
   [scale_cliff_derivation.json](scale_cliff_derivation.json). Set
   `APP_EMBEDDING_BACKEND=semantic` with the `semantic` extra for SentenceTransformers
@@ -91,10 +91,10 @@ Two retrieval choices, both defaulting to the dependency-free option:
 
 **The corpus is not persisted.** It lives in the process (one vector store per pod) and is
 built by `POST /index`, which replaces it wholly; a restart leaves the service answering
-409 until it is indexed again. Persistence and multi-tenancy are out of scope here — both
+409 until it is indexed again. Persistence and multi-tenancy are out of scope here; both
 need the external shared store described in ADR-001.
 
-## System overview — full production architecture (the private system)
+## System overview; full production architecture (the private system)
 
 > The diagram and the two tables below describe the **full private product's**
 > architecture, for design context. Components not listed under "What this
@@ -136,35 +136,35 @@ OpenTelemetry traces · slowapi rate limiting · semantic validation · PDF outp
 
 ## Architecture decisions
 
-> These record decisions taken for the **full system** — the private product. Each ADR
+> These record decisions taken for the **full system**; the private product. Each ADR
 > below says in its own header which parts hold in this repo and which do not, so a
 > decision written for the private architecture is never read as a description of `app/`.
 
 Full summaries in **[docs/decisions/](docs/decisions/)**:
 
-- **[ADR-001](docs/decisions/001-faiss-over-managed-vector-db.md)** — An in-process index over a managed vector DB (no network hop, zero standing infra), and what that costs: no persistence, no scale-out.
-- **[ADR-002](docs/decisions/002-pre-grounding-over-post-filtering.md)** — Pre-grounding over post-filtering (prevention beats detection; clean audit trail). The post-generation check is _full system_ only.
-- **[ADR-003](docs/decisions/003-circuit-breaker-for-llm-resilience.md)** — Circuit breaker for LLM resilience (timeout, bounded retry, fail fast, self-heal) — implemented here, at single-replica scope.
-- **[ADR-004](docs/decisions/004-vendor-neutral-llm-protocol.md)** — Vendor-neutral LLM protocol (model vendor is a config choice; open-sourced in `rag-llm-infra`).
+- **[ADR-001](docs/decisions/001-faiss-over-managed-vector-db.md)**: An in-process index over a managed vector DB (no network hop, zero standing infra), and what that costs: no persistence, no scale-out.
+- **[ADR-002](docs/decisions/002-pre-grounding-over-post-filtering.md)**: Pre-grounding over post-filtering (prevention beats detection; clean audit trail). The post-generation check is _full system_ only.
+- **[ADR-003](docs/decisions/003-circuit-breaker-for-llm-resilience.md)**: circuit breaker for LLM resilience (timeout, bounded retry, fail fast, self-heal), implemented here at single-replica scope.
+- **[ADR-004](docs/decisions/004-vendor-neutral-llm-protocol.md)**: Vendor-neutral LLM protocol (model vendor is a config choice; open-sourced in `rag-llm-infra`).
 
 ## Deployment
 
-- **Container** — multi-stage `python:3.12.8-slim-bookworm`, runs as a non-root user, Trivy-scanned in CI: **[deploy/Dockerfile](deploy/Dockerfile)**.
-- **Orchestration** — single-replica Helm chart (Deployment / Service / Ingress / ServiceAccount / Secret, plus opt-in ServiceMonitor and PrometheusRule). No HorizontalPodAutoscaler and no PodDisruptionBudget ship: the index is in-process, so extra replicas answer with an empty corpus — see [values.yaml](deploy/helm/values.yaml): **[deploy/helm/](deploy/helm/)**. The **Ingress is disabled by default** (secure default): a bare install exposes nothing publicly. Opt in with `ingress.enabled=true` only alongside `APP_API_KEY` (so `/index` + `/query` require a key) and `tls.enabled=true` with a real cert.
-- **Image publishing** — on merge to `main`, CI builds the image and pushes `:latest`, a commit-SHA tag, and the chart's `appVersion` tag (so a bare `helm install` resolves an image that exists) to GHCR. This repo does **not** auto-deploy anywhere.
+- **Container**: multi-stage `python:3.12.8-slim-bookworm`, runs as a non-root user, Trivy-scanned in CI: **[deploy/Dockerfile](deploy/Dockerfile)**.
+- **Orchestration**: single-replica Helm chart (Deployment / Service / Ingress / ServiceAccount / Secret, plus opt-in ServiceMonitor and PrometheusRule). No HorizontalPodAutoscaler and no PodDisruptionBudget ship: the index is in-process, so extra replicas answer with an empty corpus; see [values.yaml](deploy/helm/values.yaml): **[deploy/helm/](deploy/helm/)**. The **Ingress is disabled by default** (secure default): a bare install exposes nothing publicly. Opt in with `ingress.enabled=true` only alongside `APP_API_KEY` (so `/index` + `/query` require a key) and `tls.enabled=true` with a real cert.
+- **Image publishing**: on merge to `main`, CI builds the image and pushes `:latest`, a commit-SHA tag, and the chart's `appVersion` tag (so a bare `helm install` resolves an image that exists) to GHCR. This repo does **not** auto-deploy anywhere.
 
 ## CI/CD
 
 **This repository's own CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every pull request and every push to `main`:
 `ruff` lint + format check · `mypy` · `pip-audit` on the environment those pins install · `pytest` integration
 tests **under a 93% coverage floor**, started by [`scripts/check_suite_report.py`](scripts/check_suite_report.py) so
-the build fails unless every test the tracked files define — bar the semantic-marked ones, which the `semantic` job
-below proves the same way — appears in that run's report as having passed; a green run does not otherwise say which
-tests it ran · a **retrieval eval gate** ([`evals/`](evals/) — recall@k over a fixed
+the build fails unless every test the tracked files define; bar the semantic-marked ones, which the `semantic` job
+below proves the same way; appears in that run's report as having passed; a green run does not otherwise say which
+tests it ran · a **retrieval eval gate** ([`evals/`](evals/); recall@k over a fixed
 Q/gold set driven through the service's own `/index` and `/query`, floored in [`tests/test_eval.py`](tests/test_eval.py)
 so a retrieval regression fails the build) · a separate **`semantic` job** that installs the optional
 sentence-transformers extra and runs the paraphrase floors, which the default word-matching embedder cannot
-satisfy — that job's only test step is [`scripts/check_semantic_report.py`](scripts/check_semantic_report.py), which
+satisfy; that job's only test step is [`scripts/check_semantic_report.py`](scripts/check_semantic_report.py), which
 starts the run itself into a directory it creates and fails the build unless every semantic gate appears in the
 report that run wrote as having passed · a separate **`backends` job** that installs the faiss,
 qdrant and openai extras, proves each one actually imported (pip accepts an extra that does not
@@ -177,7 +177,7 @@ image **started in the chart's own production configuration, where an unkeyed an
 `CMD`, a missing runtime dependency or an unenforced credential fails here instead of shipping · **Trivy** image scan · a **CycloneDX SBOM**
 that is generated, read back (a document listing no components fails the build) and uploaded as an
 artifact. The image publish waits on the test, semantic, backends and IaC jobs together.
-On merge to `main` it pushes **the scanned image itself** to GHCR — the local image Trivy read and the
+On merge to `main` it pushes **the scanned image itself** to GHCR; the local image Trivy read and the
 SBOM described, re-tagged and pushed. Nothing is rebuilt for the publish, so the bytes served are the
 bytes vetted.
 
@@ -188,4 +188,4 @@ No secrets live in source; credentials are injected via repository secrets and a
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT; see [LICENSE](LICENSE).

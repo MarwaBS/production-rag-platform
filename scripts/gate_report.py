@@ -2,13 +2,13 @@
 
 An exit status is not evidence: a collection-only run, a deselect, a conftest
 that marks every item skipped, or a swallowed status all end at zero. A report
-handed in is not evidence either — it can be committed, or written by a step
+handed in is not evidence either; it can be committed, or written by a step
 that ran nothing, and copied into place. So a check built on this starts the run
 itself, into a directory it creates outside the tree, and reads back only what
 that run wrote there.
 
 A run begins only from the files the repo carries, the settings it is given and
-the variables it starts with, which leaves the code the tests import — the thing
+the variables it starts with, which leaves the code the tests import; the thing
 under review.
 """
 
@@ -233,7 +233,7 @@ def tracked_files() -> Set[str]:
 
 
 def tracked_test_files() -> List[pathlib.Path]:
-    """The test files git carries — the one listing both required sets are
+    """The test files git carries; the one listing both required sets are
     taken from, so neither can be narrowed without the other noticing."""
     return sorted(
         REPO / name for name in tracked_files() if name.startswith("tests/test_")
@@ -298,7 +298,7 @@ def unaccepted_tree() -> List[str]:
     """Whatever the run could execute that nobody has read.
 
     The tree is the commit and the commit is the manifest, so a file reaches a
-    run only by appearing in a diff — whatever it is called, and whether it is
+    run only by appearing in a diff; whatever it is called, and whether it is
     imported at startup, collected, or loaded as a plugin."""
     problems = [
         f"{line.strip()}: in the tree and not in the commit"
@@ -381,6 +381,6 @@ def prove(required: Set[str], command: Command, runner: Runner) -> List[str]:
             return [f"the run wrote no report (pytest exited {status})"]
         problems = verify(report.read_text(encoding="utf-8"), required)
         if status:
-            # A floor the report does not carry — coverage — fails only here.
+            # A floor the report does not carry (coverage) fails only here.
             problems.append(f"pytest exited {status}")
         return problems
