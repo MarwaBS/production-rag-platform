@@ -1,10 +1,10 @@
 """Producer for the retrieval eval floors (eval_floors_derivation.json).
 
-Baseline: the semantic backend on the zero-overlap paraphrase set — the one
+Baseline: the semantic backend on the zero-overlap paraphrase set; the one
 instrument here that is not saturated (the literal set is solvable by token
 matching on either backend). Floor rule: measured minus half a miss-quantum
 (0.5/n); the pipeline is deterministic, so the first additional recall miss
-trips it. The MRR steps straddle that margin — a first place slipping to second
+trips it. The MRR steps straddle that margin; a first place slipping to second
 trips the MRR floor as well, a second slipping to third does not.
 
 Needs the `semantic` extra. Run:
@@ -38,7 +38,7 @@ def _measure(queries) -> dict[str, float]:
 def derive() -> dict:
     paraphrased = tuple((q, CORPUS[gold]) for q, gold in PARAPHRASE_QUERIES)
     semantic = {"literal": _measure(QUERIES), "paraphrase": _measure(paraphrased)}
-    # Re-measure on the default hash backend for the recorded contrast — the
+    # Re-measure on the default hash backend for the recorded contrast; the
     # gap between these two paraphrase rows is the entire case for the
     # semantic extra.
     embedder._settings.embedding_backend = "hash"

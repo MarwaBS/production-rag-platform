@@ -57,8 +57,8 @@ def test_the_control_is_the_shipped_construction_over_another_pool(
 ) -> None:
     """Point the control at the corpus's own pool and it must come out as the
     shipped distractor, character for character. Naming the variables to hold
-    still leaves every unnamed one free — word count, prefix, index arithmetic,
-    separators — and any of those moves the curve it is supposed to isolate."""
+    still leaves every unnamed one free; word count, prefix, index arithmetic,
+    separators; and any of those moves the curve it is supposed to isolate."""
     from scripts import derive_scale_cliff as producer
 
     monkeypatch.setattr(producer, "FOREIGN", producer.VOCABULARY)

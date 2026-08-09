@@ -26,7 +26,7 @@ client = TestClient(app)
 def bound(name: str) -> int:
     value = getattr(main.settings, name, None)
     assert value is not None, (
-        f"Settings.{name} does not exist — the input contract is unbounded on this axis"
+        f"Settings.{name} does not exist; the input contract is unbounded on this axis"
     )
     return int(value)
 
@@ -107,7 +107,7 @@ def test_canonically_equivalent_documents_are_one_document() -> None:
 
 def test_a_query_matches_its_document_whatever_the_unicode_form() -> None:
     """A query that IS the document, in the other canonical form, must score as
-    the document itself — otherwise retrieval depends on which keyboard/OS
+    the document itself; otherwise retrieval depends on which keyboard/OS
     produced the bytes."""
     nfc = unicodedata.normalize("NFC", "café résumé naïveté détaillé")
     nfd = unicodedata.normalize("NFD", nfc)
@@ -124,7 +124,7 @@ def test_a_query_matches_its_document_whatever_the_unicode_form() -> None:
 
 def test_a_body_with_no_declared_length_is_refused() -> None:
     """A chunked body declares no Content-Length, so the size budget cannot be
-    checked without buffering the whole stream first — the exact cost the budget
+    checked without buffering the whole stream first; the exact cost the budget
     exists to prevent. Refusing with 411 keeps the cap unbypassable."""
     body = (chunk for chunk in [b'{"documents": ["a doc"]}'])
     response = client.post(

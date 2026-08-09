@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # meaning via sentence-transformers and needs the extra.
     embedding_backend: Literal["hash", "semantic"] = "hash"
     default_top_k: int = Field(default=3, ge=1)
-    # Input-contract bounds sized to the reference pod's 512Mi limit — judgement
+    # Input-contract bounds sized to the reference pod's 512Mi limit; judgement
     # calls, not derivations, and chunking multiplies them: vectors scale with
     # windows. The tests pin that each bound exists and bites, not its value.
     max_documents: int = Field(default=10_000, ge=1)
@@ -65,7 +65,7 @@ class Settings(BaseSettings):
         # A key with nothing visible in it is refused rather than stripped:
         # empty means "no auth configured", so reducing one to empty would open
         # the data-plane. Asked as "has a visible character", not as a list of
-        # the blanks anyone thought of — a pasted NBSP is as invisible as a tab.
+        # the blanks anyone thought of; a pasted NBSP is as invisible as a tab.
         if self.api_key and not any(
             character.isprintable() and not character.isspace()
             for character in self.api_key

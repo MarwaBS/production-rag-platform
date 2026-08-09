@@ -1,4 +1,4 @@
-# ADR 003 — Circuit breaker for LLM resilience
+# ADR 003. Circuit breaker for LLM resilience
 
 **Status:** Accepted
 
@@ -21,13 +21,13 @@ Every provider call is wrapped in three mechanisms, all enforced in
   abandonable thread and the route stops waiting at the deadline.
 - **Bounded retry** (`APP_LLM_RETRY_ATTEMPTS`, default 1): an immediate
   provider failure is retried at most this many times per request. A timeout
-  is **not** retried — that would hold the worker for a second full window.
+  is **not** retried; that would hold the worker for a second full window.
 - **Circuit breaker** (`APP_LLM_BREAKER_FAILURES`, default 3;
   `APP_LLM_BREAKER_RESET_SECONDS`, default 30): after that many *consecutive*
   failed requests the provider is not called at all; once the reset window
   passes, one request probes it again, and a success closes the breaker.
 
-Whatever fails — timeout, exhausted retries, open breaker — the caller gets
+Whatever fails (timeout, exhausted retries, open breaker) the caller gets
 the same documented response: HTTP 503 with `{"error": "llm_unavailable"}`.
 Never an unbounded wait, never an unshaped 500.
 
@@ -36,8 +36,8 @@ Never an unbounded wait, never an unshaped 500.
 This service is single-replica by design (the corpus lives in process), so the
 breaker does **not** do what a breaker does in a fleet: there is no cascade to
 arrest and no sibling to protect. Its two real jobs here are **latency
-shaping** — fail fast instead of hanging a synchronous route's worker — and
-**provider backoff** — an erroring API is probed once per reset window instead
+shaping** (fail fast instead of hanging a synchronous route's worker) and
+**provider backoff**; an erroring API is probed once per reset window instead
 of being hammered on every request. The reset window is also the only retry
 backoff; with one immediate retry per request at one replica, jitter would be
 machinery without a job.
@@ -56,7 +56,7 @@ opens after a few consecutive timeouts and stops creating new ones.
   sensible only once multiple services share the dependency and need one
   common policy.
 - **Provider fallback chain:** route to a second vendor when the primary
-  trips — complementary, not a replacement. A budget-aware `FallbackLLM`
+  trips; complementary, not a replacement. A budget-aware `FallbackLLM`
   (`+ BudgetExhausted`) implementing this is open-sourced in
   [rag-llm-infra](https://github.com/MarwaBS/rag-llm-infra) but is not wired
   in here.

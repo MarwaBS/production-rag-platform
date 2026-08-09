@@ -1,4 +1,4 @@
-"""`python -m evals` — print the retrieval eval summary (the CI floor lives in
+"""`python -m evals`; print the retrieval eval summary (the CI floor lives in
 tests/test_eval.py)."""
 
 from .harness import evaluate

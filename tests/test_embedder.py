@@ -1,5 +1,5 @@
-"""The embedding backend is typed configuration: defaulted, validated, and —
-like every other optional backend — refused at boot with the exact fix when
+"""The embedding backend is typed configuration: defaulted, validated, and;
+like every other optional backend; refused at boot with the exact fix when
 its package is missing."""
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ def test_an_unknown_backend_is_rejected_at_startup() -> None:
 
 
 def test_embed_dispatches_on_the_selected_backend(monkeypatch) -> None:
-    """`embed` must read the setting on every call — capturing the choice into a
+    """`embed` must read the setting on every call; capturing the choice into a
     module constant would make the backend unswitchable after import."""
     sentinel = np.ones((1, 4), dtype="float32")
     monkeypatch.setattr(embedder, "_semantic_embed", lambda texts: sentinel)

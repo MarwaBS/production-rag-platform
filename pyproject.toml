@@ -57,7 +57,7 @@ ignore = ["E501"]
 python_version = "3.12"
 warn_unused_configs = true
 # Off by default, and a function with no annotation anywhere is then a body
-# nothing judges — a waiver that leaves neither a directive nor a decorator.
+# nothing judges; a waiver that leaves neither a directive nor a decorator.
 check_untyped_defs = true
 
 # sentence-transformers is an optional extra the type-check environment does not

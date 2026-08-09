@@ -7,7 +7,7 @@ and one with no witness at all is a hope.
 
 How each file is read, because it bounds what an assertion can promise:
 `values.yaml` carries no template directives, so it is PARSED and its assertions
-are structural — an empty `limits:` is a null value, not a line a pattern can
+are structural; an empty `limits:` is a null value, not a line a pattern can
 skim past into the next block. The files under `templates/` are Go templates and
 are not valid YAML until Helm renders them, so those assertions read text with
 comments stripped. That is weaker, and what closes the gap is rendering the chart
@@ -69,7 +69,7 @@ def test_the_container_runs_as_a_named_non_root_user() -> None:
     """The image must end as an account the image itself created.
 
     Docker honours the LAST USER, a bare uid has no passwd entry, and root is the
-    thing the claim exists to deny — so the final instruction is what counts.
+    thing the claim exists to deny; so the final instruction is what counts.
     """
     raw = (ROOT / "deploy" / "Dockerfile").read_text(encoding="utf-8")
     dockerfile = "\n".join(re.sub(r"#.*$", "", line) for line in raw.splitlines())
@@ -130,7 +130,7 @@ def test_probes_target_health_and_not_ready() -> None:
     "field", ["timeoutSeconds", "periodSeconds", "failureThreshold"]
 )
 def test_probes_declare_their_timing(field: str) -> None:
-    """Left unset, the cluster defaults apply — a 1s timeout that a large request
+    """Left unset, the cluster defaults apply; a 1s timeout that a large request
     can already exceed."""
     deployment = _template("deployment.yaml")
     for probe in ("readinessProbe", "livenessProbe"):
@@ -153,7 +153,7 @@ def test_the_secret_is_optional_when_the_chart_does_not_create_it() -> None:
     block = env_from.group(2)
     # No template control-flow inside the block: `optional: true` behind an
     # `{{- if }}` is absent on the very path this gate protects. A condition,
-    # if the chart ever needs one, wraps the whole block — inside it,
+    # if the chart ever needs one, wraps the whole block; inside it,
     # conditional and deleted are the same thing.
     controlled = [
         line.strip()
@@ -177,7 +177,7 @@ def test_the_secret_is_optional_when_the_chart_does_not_create_it() -> None:
         entry.append(line)
     block = chr(10).join(entry)
     # `optional: true` only. Wrapping the reference in `if .Values.secrets.create`
-    # also stops the pod wedging — by dropping the env entirely, so it starts with
+    # also stops the pod wedging; by dropping the env entirely, so it starts with
     # no API key and serves an unauthenticated data-plane on the very path the
     # chart documents for externally managed secrets.
     assert "optional: true" in block, (
@@ -190,7 +190,7 @@ def test_the_secret_is_rendered_only_when_the_chart_creates_it() -> None:
     """`secrets.create: false` exists so an out-of-band Secret survives upgrades.
 
     Without the guard the chart renders its own (empty) Secret unconditionally,
-    and every `helm upgrade` resets the externally managed data — the exact
+    and every `helm upgrade` resets the externally managed data; the exact
     defect the create flag exists to prevent.
     """
     secret = _template("secret.yaml")
@@ -223,7 +223,7 @@ def test_the_chart_ships_a_scrape_object() -> None:
 
 
 def test_the_chart_ships_an_alert_rule_on_metrics_the_app_exports() -> None:
-    """An alert on a metric the app does not export can never fire — the rule
+    """An alert on a metric the app does not export can never fire; the rule
     must name real series, checked against the code that registers them."""
     rule = _template("prometheusrule.yaml")
     assert "kind: PrometheusRule" in rule
@@ -268,7 +268,7 @@ def test_enabling_the_ingress_alone_cannot_publish_plaintext() -> None:
     template = _template("ingress.yaml")
     directives = re.findall(r"\{\{-?(.*?)-?\}\}", template, flags=re.S)
     # A branch on a literal never depends on the install, so a guard parked
-    # inside one is decoration — the same unreachable-branch rule the key-check
+    # inside one is decoration; the same unreachable-branch rule the key-check
     # gate applies. Literals only: evaluating expressions is the renderer's
     # job, and rendering the chart in CI is what closes that residual.
     dead = [

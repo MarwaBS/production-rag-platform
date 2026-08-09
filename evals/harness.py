@@ -1,5 +1,5 @@
 """Fixed-dataset retrieval eval through the service's own /index and /query
-routes — a regression anywhere on the serving path moves these numbers. A
+routes; a regression anywhere on the serving path moves these numbers. A
 retrieval eval, not an LLM eval: the default backend is a Mock LLM, so what
 can regress is retrieval.
 
@@ -75,7 +75,7 @@ PARAPHRASE_QUERIES: tuple[tuple[str, int], ...] = (
     ("self-healing placement of replicated processes over a machine pool", 3),
 )
 
-# (query, gold document) — the gold is the corpus entry the query is about.
+# (query, gold document); the gold is the corpus entry the query is about.
 QUERIES: tuple[tuple[str, str], ...] = (
     ("inner product similarity search index", CORPUS[0]),
     ("vector database over grpc with payload filtering", CORPUS[1]),

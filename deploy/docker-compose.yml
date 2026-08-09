@@ -1,4 +1,4 @@
-# Local stack — builds and runs the reference service. No secrets committed.
+# Local stack; builds and runs the reference service. No secrets committed.
 # Set APP_LLM_BACKEND=openai + OPENAI_API_KEY (via a gitignored .env) for real generation.
 services:
   api:
@@ -12,4 +12,4 @@ services:
       # ENV is deliberately NOT set here: rag-llm-infra keys its single-line
       # JSON log formatter on ENV=prod, and this compose file is the local dev
       # stack where human-readable logs are wanted. The Helm chart (the prod
-      # deploy) sets ENV=prod — see deploy/helm/values.yaml.
+      # deploy) sets ENV=prod; see deploy/helm/values.yaml.

@@ -1,7 +1,7 @@
 # Dev/CI toolchain pins, applied via `pip install -c` (see .github/workflows/ci.yml).
 #
 # pyproject.toml declares only minimums for the dev tools, so without this file
-# every CI run floats to the latest ruff/mypy/pytest release — a new tool version
+# every CI run floats to the latest ruff/mypy/pytest release; a new tool version
 # could break main with zero repo changes. Constraints keep the gate
 # deterministic; bump them deliberately (and watch CI) instead.
 #
@@ -20,7 +20,7 @@ pytest-cov==7.1.0
 coverage==7.15.2
 pip-audit==2.10.1
 # The semantic job's floor gate re-derives a measurement and compares it to
-# the committed one, so the model stack is pinned — a silent torch or
+# the committed one, so the model stack is pinned; a silent torch or
 # transformers bump must not move it.
 sentence-transformers==5.6.1
 torch==2.13.0

@@ -197,7 +197,7 @@ def test_a_second_place_to_take_settings_from_is_read_before_the_run(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`-p` in a settings file loads a plugin by name, which autoload being off
-    does not touch, into the position a conftest holds — over the suite whose
+    does not touch, into the position a conftest holds; over the suite whose
     tests would otherwise be the thing objecting. So the settings are read from
     the tree too, and only from the file the command names."""
     from scripts import gate_report
@@ -430,7 +430,7 @@ def test_a_startup_module_stops_the_run_before_a_command_is_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """These are imported by the interpreter itself, so the tree is not the only
-    place one can come from — the environment the tools are installed into is."""
+    place one can come from; the environment the tools are installed into is."""
     from scripts import gate_report
 
     monkeypatch.setattr(gate_report, "_STARTUP_MODULES", ("os",))
@@ -442,7 +442,7 @@ def test_a_startup_module_stops_the_run_before_a_command_is_read(
 
 
 def test_an_empty_marker_set_is_not_a_pass(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Nothing required means every report satisfies it — a gate that certifies
+    """Nothing required means every report satisfies it; a gate that certifies
     an empty suite is the vacuous case this whole check exists to reject. The
     run has to write its report, or this passes on the missing file instead."""
     from scripts import check_semantic_report as checker
@@ -474,8 +474,8 @@ def test_the_checker_fails_the_build_when_the_gates_are_not_proven(
 
 def test_the_suite_checker_requires_every_test_the_default_run_collects() -> None:
     """The checker reads its required set out of the source, so a test written
-    in a form that reader does not recognise — inside a class, generated at
-    import — would be absent from both sides and prove itself. pytest is the
+    in a form that reader does not recognise; inside a class, generated at
+    import; would be absent from both sides and prove itself. pytest is the
     authority on what the run contains, so the two have to agree."""
     from scripts.check_suite_report import required_tests
 

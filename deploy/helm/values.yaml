@@ -1,16 +1,16 @@
-# Reference defaults — override per environment (image, host, resources).
+# Reference defaults; override per environment (image, host, resources).
 # `helm lint` + `helm template` validate this chart in CI on every push.
 #
 # Single replica by design: the index lives in process (app/main.py), so a second
 # pod answers /query with 409 until it receives its own /index. Scale-out needs an
 # external shared store (docs/decisions/001-faiss-over-managed-vector-db.md), which
-# is why this chart ships no HorizontalPodAutoscaler and no PodDisruptionBudget —
+# is why this chart ships no HorizontalPodAutoscaler and no PodDisruptionBudget;
 # a PDB with minAvailable=1 over one replica would block node drains outright.
 replicaCount: 1
 
 image:
   repository: ghcr.io/marwabs/production-rag-platform
-  # Tag strategy — CI pushes THREE tags to GHCR on every merge to main:
+  # Tag strategy. CI pushes THREE tags to GHCR on every merge to main:
   #   :latest, :<commit-sha>, and :<appVersion> (from Chart.yaml).
   # Empty tag -> the Deployment falls back to the chart's appVersion, which CI
   # publishes precisely so a bare `helm install` resolves an image that exists.
@@ -63,8 +63,8 @@ monitoring:
 secrets:
   # The app refuses to boot on this chart's APP_ENV=production without
   # APP_API_KEY, so an install needs `--set secrets.data.APP_API_KEY=<base64>`.
-  # For real secrets set `create: false` and manage the Secret out of band —
+  # For real secrets set `create: false` and manage the Secret out of band;
   # otherwise every `helm upgrade` overwrites its data with what is templated here.
   create: true
-  # base64-encoded key/values, dev/test only — NEVER commit real secrets here:
+  # base64-encoded key/values, dev/test only. NEVER commit real secrets here:
   data: {}

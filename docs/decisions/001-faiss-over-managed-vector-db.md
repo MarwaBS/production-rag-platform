@@ -1,4 +1,4 @@
-# ADR 001 — An in-process index over a managed vector database
+# ADR 001. An in-process index over a managed vector database
 
 **Status:** Accepted
 
@@ -22,7 +22,7 @@ monitor, for no quality gain at this scale. Keeping the choice behind a protocol
 backend is a configuration change rather than a rewrite.
 
 No latency figure is claimed here, because nothing in this repo measures one. The numbers this
-repo does state — the chunk window, the eval floors, the scale curve — each carry a producer
+repo does state (the chunk window, the eval floors, the scale curve) each carry a producer
 under `scripts/` and a committed artefact that a gate re-derives.
 
 ## Trade-off
@@ -43,7 +43,7 @@ The reference implementation of the protocol (FAISS / NumPy / Qdrant) is open-so
 
 ## Alternatives considered
 - **Managed vector DB (Pinecone / Weaviate / Qdrant Cloud):** richer ops tooling, but adds a
-  network hop, a monthly bill, and a standing service to monitor — no quality gain at this scale.
+  network hop, a monthly bill, and a standing service to monitor; no quality gain at this scale.
 - **pgvector (reuse the primary database):** avoids a new dependency, but couples retrieval
   latency to database load and gives weaker ANN performance for this access pattern.
 
