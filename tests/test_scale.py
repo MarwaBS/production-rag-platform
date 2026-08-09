@@ -167,3 +167,24 @@ def test_the_recorded_embedder_width_follows_the_embedder() -> None:
         assert derive_scale_cliff.derive()["embedder_dimensions"] == 7
     finally:
         embedder._DIM, derive_scale_cliff.CORPUS_SIZES = original_dim, original_sizes
+
+
+def test_a_gold_tied_at_the_cut_scores_the_same_whichever_way_the_tie_broke() -> None:
+    """The store orders equal scores arbitrarily, so the curve was measuring
+    argpartition rather than retrieval: CI produced 0.8333 where the committed
+    file said 0.75, on identical code."""
+    from scripts.derive_scale_cliff import reliably_top3
+
+    def hit(text: str, score: float) -> dict:
+        return {"text": text, "score": score}
+
+    tied_in = [hit("a", 0.9), hit("b", 0.9), hit("gold", 0.5), hit("d", 0.5)]
+    tied_out = [hit("a", 0.9), hit("b", 0.9), hit("d", 0.5), hit("gold", 0.5)]
+    assert reliably_top3(tied_in, "gold") == reliably_top3(tied_out, "gold")
+    assert not reliably_top3(tied_in, "gold")
+
+    clear = [hit("a", 0.9), hit("b", 0.8), hit("gold", 0.7), hit("d", 0.5)]
+    assert reliably_top3(clear, "gold")
+
+    # Nothing else was in contention, so there is no tie to lose.
+    assert reliably_top3([hit("gold", 0.4)], "gold")

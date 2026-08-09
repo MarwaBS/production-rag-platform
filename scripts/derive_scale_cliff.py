@@ -64,6 +64,21 @@ def _control(index: int, vocabulary: List[str]) -> str:
     return f"note{index} {_words(index, FOREIGN, DISTRACTOR_WORDS)}"
 
 
+def reliably_top3(hits: List[Dict[str, Any]], gold: str) -> bool:
+    """Whether the gold document is in the top 3 however ties are broken.
+
+    Distractors built from this vocabulary hash to the same buckets as the gold,
+    so at 10000 documents 11 of the 12 queries tie exactly at the rank-3 cut, and
+    which tied document the store's argpartition keeps is unspecified. Asking
+    only whether the gold came back measures that choice, and the answer moved
+    between machines. The fourth score is the same value whichever tied document
+    holds the slot, so beating it outright is stable. Scores at or below zero are
+    dropped upstream, so a short result means nothing else was in contention.
+    """
+    cutoff = hits[3]["score"] if len(hits) > 3 else 0.0
+    return any(hit["text"] == gold and hit["score"] > cutoff for hit in hits[:3])
+
+
 def _curve(
     client: Any,
     make_document: Callable[[int, List[str]], str],
@@ -81,8 +96,13 @@ def _curve(
             raise RuntimeError(f"dedup shrank the corpus: {indexed}")
         found = 0
         for query, gold in QUERIES:
-            body = client.post("/query", json={"query": query, "k": 3}).json()
-            found += gold in [hit["text"] for hit in body["retrieved"]]
+            # One past the cut, and the gold has to beat that score outright.
+            # Distractors built from this vocabulary hash to the same buckets as
+            # the gold, so 11 of the 12 queries tie exactly at rank 3, and which
+            # tied document the store's argpartition keeps is unspecified. Asking
+            # only whether the gold came back measures that choice, not recall.
+            body = client.post("/query", json={"query": query, "k": 4}).json()
+            found += reliably_top3(body["retrieved"], gold)
         curve[str(size)] = round(found / len(QUERIES), 4)
     return curve
 
