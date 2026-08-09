@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     vector_backend: Literal["numpy", "faiss", "qdrant"] = (
         "numpy"  # faiss/qdrant need the extra
     )
+    # Only qdrant reads this. That backend's add() replaces the collection's
+    # contents, so the library refuses to guess a name and share it by accident.
+    qdrant_collection: str = Field(default="production-rag-platform", min_length=1)
     # "hash" matches words (deterministic, no download); "semantic" matches
     # meaning via sentence-transformers and needs the extra.
     embedding_backend: Literal["hash", "semantic"] = "hash"

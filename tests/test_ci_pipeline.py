@@ -58,7 +58,7 @@ TOOL_CONFIG = {
         "check_untyped_defs": True,
         "overrides": [
             {
-                "module": ["rag_llm_infra.*", "sentence_transformers.*"],
+                "module": ["sentence_transformers.*"],
                 "ignore_missing_imports": True,
             }
         ],

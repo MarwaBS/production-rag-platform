@@ -448,9 +448,15 @@ def test_every_permitted_backend_starts_or_names_its_missing_extra(
     except RuntimeError as missing:
         assert f"production-rag-platform[{value}]" in str(missing), str(missing)
         return
-    factory = main.get_vector_store if field == "vector_backend" else main.get_llm
+    # Built the way main builds it, so qdrant is handed the collection name the
+    # library requires instead of a call shape only this test makes.
+    built = (
+        main._vector_store(settings)
+        if field == "vector_backend"
+        else main.get_llm(value)
+    )
     # A factory ignoring its argument satisfies a bare `assert .backend_name`.
-    assert factory(value).backend_name == value
+    assert built.backend_name == value
 
 
 def test_pyproject_declares_every_nondefault_backend_extra(

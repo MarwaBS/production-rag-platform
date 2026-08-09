@@ -14,11 +14,11 @@ requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "Marwa Ben Salem" }]
 dependencies = [
-  # Capped where the other 0.x deps are not: 0.2 is unreleased, so nothing here
-  # has run against it, and the binding that would break is the `response=`
-  # keyword main.py forwards into get_llm, which mypy cannot check while this
-  # package ships no py.typed.
-  "rag-llm-infra>=0.1.1,<0.2",
+  # The supported line: that package's own policy marks 0.1.x unsupported, so
+  # staying under 0.2 would pin this service to a line its author does not fix.
+  # Capped below 0.3 because 0.x minors promise no compatibility and 0.3 does
+  # not exist to test against.
+  "rag-llm-infra>=0.2,<0.3",
   "fastapi>=0.115",
   "uvicorn>=0.30",
   "prometheus-client>=0.20",
@@ -31,9 +31,9 @@ dependencies = [
 # `APP_LLM_BACKEND=openai` / `APP_VECTOR_BACKEND=faiss|qdrant` modes are actually
 # installable (`pip install production-rag-platform[openai]`). app.main fails
 # fast at startup if a selected backend's package is missing.
-openai = ["rag-llm-infra[openai]>=0.1.1,<0.2"]
-faiss = ["rag-llm-infra[faiss]>=0.1.1,<0.2"]
-qdrant = ["rag-llm-infra[qdrant]>=0.1.1,<0.2"]
+openai = ["rag-llm-infra[openai]>=0.2,<0.3"]
+faiss = ["rag-llm-infra[faiss]>=0.2,<0.3"]
+qdrant = ["rag-llm-infra[qdrant]>=0.2,<0.3"]
 semantic = ["sentence-transformers>=3.0"]
 dev = ["pytest>=8.0", "pytest-cov>=5.0", "httpx>=0.27", "ruff>=0.6", "mypy>=1.11", "pyyaml>=6.0", "types-PyYAML>=6.0"]
 
@@ -60,11 +60,11 @@ warn_unused_configs = true
 # nothing judges — a waiver that leaves neither a directive nor a decorator.
 check_untyped_defs = true
 
-# Two packages mypy cannot resolve here: rag-llm-infra ships no py.typed marker,
-# and sentence-transformers is an optional extra the type-check environment does
-# not install. Scoped to these two — everything else stays strictly checked.
+# sentence-transformers is an optional extra the type-check environment does not
+# install. Scoped to it alone: rag-llm-infra ships py.typed from 0.2, so every
+# call into it is now checked.
 [[tool.mypy.overrides]]
-module = ["rag_llm_infra.*", "sentence_transformers.*"]
+module = ["sentence_transformers.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

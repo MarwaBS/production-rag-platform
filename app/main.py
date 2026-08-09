@@ -46,7 +46,12 @@ from pydantic import (
 )
 from starlette.types import Message, Receive, Scope, Send
 
-from rag_llm_infra import configure_logging, get_llm, get_vector_store
+from rag_llm_infra import (
+    VectorStoreProtocol,
+    configure_logging,
+    get_llm,
+    get_vector_store,
+)
 
 from .chunking import chunk
 from .config import Settings, get_settings
@@ -209,6 +214,18 @@ def _doc_id(text: str) -> str:
     collision odds are ~n^2/2^65 — negligible at any corpus this service holds.
     """
     return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def _vector_store(s: Settings) -> VectorStoreProtocol:
+    """Build the configured store, naming the collection qdrant insists on.
+
+    Only qdrant takes one: its `add()` replaces that collection's contents, so
+    the library refuses to guess a name two services could end up sharing.
+    Passing it for any other backend is an error there, not a no-op.
+    """
+    if s.vector_backend == "qdrant":
+        return get_vector_store("qdrant", collection=s.qdrant_collection)
+    return get_vector_store(s.vector_backend)
 
 
 def _grounded_answer(hits: List[Dict[str, Any]]) -> str:
@@ -482,7 +499,7 @@ def index(req: IndexRequest, _: None = Depends(require_api_key)) -> Dict[str, in
         )
         for ordinal, piece in enumerate(pieces):
             windows.append((piece, f"{doc_id}:{ordinal}", doc_id))
-    store = get_vector_store(settings.vector_backend)
+    store = _vector_store(settings)
     store.add(embed([text for text, _, _ in windows]))
     global _index
     _index = _Index(windows=tuple(windows), store=store)
