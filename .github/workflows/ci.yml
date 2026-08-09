@@ -137,22 +137,38 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           vuln-type: os,library
-      - name: Run the built image and exercise its API
+      - name: Run the built image in the configuration the chart deploys
         # Everything else reads the image without starting it, so a broken CMD,
         # a missing runtime dependency or a non-executable entrypoint stays
-        # green through build, scan and publish.
+        # green through build, scan and publish. Started in production mode
+        # because that is what the chart sets and the only mode that refuses to
+        # boot without a key; the demo default would exercise the open path.
         run: |
-          docker run -d --name smoke -p 8000:8000 "$IMAGE:ci"
+          docker run -d --name smoke -p 8000:8000 \
+            -e APP_ENV=production -e APP_API_KEY=ci-key "$IMAGE:ci"
           for _ in $(seq 30); do
             if curl -fsS localhost:8000/health > /dev/null; then serving=1; break; fi
             sleep 1
           done
           docker logs smoke
           test -n "${serving:-}"
-          curl -fsS -XPOST localhost:8000/index -H 'content-type: application/json' \
+      - name: The running image refuses the data plane without the key
+        # A missing header and a wrong one are different code paths, and the
+        # 401 is the control the chart's ingress warning depends on.
+        run: |
+          for header in "X-Not-A-Key: 1" "X-API-Key: wrong-key"; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' -XPOST localhost:8000/index \
+              -H "$header" -H 'content-type: application/json' -d '{"documents":["x"]}')"
+            test "$code" = "401" || { echo "::error::/index with $header got $code"; exit 1; }
+          done
+      - name: The running image serves the data plane with the key
+        run: |
+          auth='X-API-Key: ci-key'
+          curl -fsS -XPOST localhost:8000/index -H "$auth" \
+            -H 'content-type: application/json' \
             -d '{"documents":["a document the smoke test can retrieve"]}'
-          curl -fsS -XPOST localhost:8000/query -H 'content-type: application/json' \
-            -d '{"query":"retrieve","k":1}'
+          curl -fsS -XPOST localhost:8000/query -H "$auth" \
+            -H 'content-type: application/json' -d '{"query":"retrieve","k":1}'
           docker rm -f smoke
       - name: Generate CycloneDX SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
