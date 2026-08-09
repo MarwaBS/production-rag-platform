@@ -586,20 +586,43 @@ PIPELINE_STEPS = {
             (),
         ),
         (
-            "Run the built image and exercise its API",
+            "Run the built image in the configuration the chart deploys",
             None,
             (
-                'docker run -d --name smoke -p 8000:8000 "$IMAGE:ci"',
+                "docker run -d --name smoke -p 8000:8000 \\",
+                '-e APP_ENV=production -e APP_API_KEY=ci-key "$IMAGE:ci"',
                 "for _ in $(seq 30); do",
                 "if curl -fsS localhost:8000/health > /dev/null; then serving=1; break; fi",
                 "sleep 1",
                 "done",
                 "docker logs smoke",
                 'test -n "${serving:-}"',
-                "curl -fsS -XPOST localhost:8000/index -H 'content-type: application/json' \\",
+            ),
+        ),
+        (
+            "The running image refuses the data plane without the key",
+            None,
+            (
+                'for header in "X-Not-A-Key: 1" "X-API-Key: wrong-key"; do',
+                "code=\"$(curl -s -o /dev/null -w '%{http_code}' -XPOST "
+                "localhost:8000/index \\",
+                "-H \"$header\" -H 'content-type: application/json' -d "
+                '\'{"documents":["x"]}\')"',
+                'test "$code" = "401" || { echo "::error::/index with $header got '
+                '$code"; exit 1; }',
+                "done",
+            ),
+        ),
+        (
+            "The running image serves the data plane with the key",
+            None,
+            (
+                "auth='X-API-Key: ci-key'",
+                'curl -fsS -XPOST localhost:8000/index -H "$auth" \\',
+                "-H 'content-type: application/json' \\",
                 '-d \'{"documents":["a document the smoke test can retrieve"]}\'',
-                "curl -fsS -XPOST localhost:8000/query -H 'content-type: application/json' \\",
-                '-d \'{"query":"retrieve","k":1}\'',
+                'curl -fsS -XPOST localhost:8000/query -H "$auth" \\',
+                '-H \'content-type: application/json\' -d \'{"query":"retrieve","k":1}\'',
                 "docker rm -f smoke",
             ),
         ),

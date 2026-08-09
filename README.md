@@ -1,6 +1,6 @@
 ## What this is
 
-A deployable reference RAG service that grounds every generated answer in the caller's own documents — served behind a typed API and shipped with the full production envelope: containerized, Kubernetes-deployable, observable, CI-gated.
+A deployable reference RAG service that constrains every generated answer to the caller's own retrieved documents — served behind a typed API and shipped with the full production envelope: containerized, Kubernetes-deployable, observable, CI-gated.
 
 **[Open infrastructure: rag-llm-infra](https://pypi.org/project/rag-llm-infra/)** — the published package this service runs on. A separate private product is built on the same design; the boundary table below says which parts run here.
 
@@ -23,9 +23,12 @@ Stack: FastAPI · rag-llm-infra · NumPy retrieval (FAISS/Qdrant optional) · Pr
 
 **Evidence-grounded LLM generation, built as a production service — not a notebook.**
 
-A retrieval-augmented generation platform that grounds every generated claim in the user's
-own input, served behind a typed API with full production infrastructure: containerized,
-Kubernetes-deployable, observable, and CI/CD-gated.
+A retrieval-augmented generation platform that constrains generation to the user's own
+retrieved documents, served behind a typed API with full production infrastructure:
+containerized, Kubernetes-deployable, observable, and CI/CD-gated. Constrained is not
+verified: what is gated here is that the retrieved evidence reaches the prompt, that the
+prompt holds the model to it, and that the answer changes when the evidence changes.
+Checking a generated claim against that evidence is the private system's job.
 
 > **What runs here vs. what's design context** — the one thing to get straight:
 >
@@ -167,8 +170,9 @@ exist without a word) and requires every advertised backend to construct rather 
 extra it is missing · `helm lint` + `helm template`
 render (defaults **and** every opt-in template, so the ingress, TLS and monitoring manifests are
 rendered rather than shipped unseen) · `hadolint` on the Dockerfile · Docker image build · the built
-image **started, with `/health`, `/index` and `/query` exercised against it**, so a broken `CMD` or a
-missing runtime dependency fails here instead of shipping · **Trivy** image scan · a **CycloneDX SBOM**
+image **started in the chart's own production configuration, where an unkeyed and a wrongly keyed
+`/index` must both come back 401 before the keyed `/index` and `/query` are exercised**, so a broken
+`CMD`, a missing runtime dependency or an unenforced credential fails here instead of shipping · **Trivy** image scan · a **CycloneDX SBOM**
 that is generated, read back (a document listing no components fails the build) and uploaded as an
 artifact. The image publish waits on the test, semantic, backends and IaC jobs together.
 On merge to `main` it pushes **the scanned image itself** to GHCR — the local image Trivy read and the
