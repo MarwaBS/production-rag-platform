@@ -108,11 +108,9 @@ _OTHER_SETTINGS = ("pytest.ini", ".pytest.ini", "tox.ini", "setup.cfg")
 # What the file the command does name has to say. Read here and not by a test,
 # because what a settings file loads through `-p` is a plugin, holding the
 # position a conftest holds, over the suite that test would have been in.
-# Every child this repo spawns, bounded. Measured warm: git ls-files 0.0s, ruff
-# 0.1s, the chunking producer 0.1s, the scale producer 6.5s, pytest --collect-only
-# 6.8s, the semantic floor producer 9.8s. 900 leaves room for a cold model
-# download and still turns a hung child into a failure rather than a job that
-# burns its six-hour ceiling.
+# Every child this repo spawns, bounded. Heaviest measured: the suite under
+# coverage at 174s. 900 leaves headroom for a cold model download and still
+# turns a hung child into a failure rather than a job at its six-hour ceiling.
 SUBPROCESS_TIMEOUT_S = 900
 
 
@@ -385,7 +383,18 @@ def prove(required: Set[str], command: Command, runner: Runner) -> List[str]:
         # earlier step may hold, it is not what gets read back here.
         report = pathlib.Path(scratch) / "report.xml"
         cache = pathlib.Path(scratch) / "bytecode"
-        status = runner(command(report), cwd=str(REPO), env=environment(cache))
+        # The runner arrives as a value, so this call is the only place its
+        # deadline can be set. A run that hits it is unproven, which is a
+        # problem to report, not a traceback.
+        try:
+            status = runner(
+                command(report),
+                cwd=str(REPO),
+                env=environment(cache),
+                timeout=SUBPROCESS_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            return [f"the run did not finish within {SUBPROCESS_TIMEOUT_S}s"]
         if not report.exists():
             return [f"the run wrote no report (pytest exited {status})"]
         problems = verify(report.read_text(encoding="utf-8"), required)

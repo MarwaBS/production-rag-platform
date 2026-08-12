@@ -136,7 +136,7 @@ def test_the_checker_reads_only_a_report_the_run_it_started_wrote(
 
     seen: Dict[str, Any] = {}
 
-    def runner(argv: List[str], cwd: str, env: Dict[str, str]) -> int:
+    def runner(argv: List[str], cwd: str, env: Dict[str, str], timeout: int) -> int:
         target = _junitxml(argv)
         seen["path"] = target
         seen["existed"] = target.exists()
@@ -155,7 +155,7 @@ def test_the_checker_reads_only_a_report_the_run_it_started_wrote(
     assert pathlib.Path(seen["cwd"]) == ROOT, seen["cwd"]
 
     # A run that writes nothing is the collection-only case: no report, no proof.
-    assert check(runner=lambda argv, cwd, env: 1) == [
+    assert check(runner=lambda argv, cwd, env, timeout: 1) == [
         "the run wrote no report (pytest exited 1)"
     ]
 
@@ -185,7 +185,7 @@ def test_the_run_is_started_with_nothing_loaded_its_command_did_not_name(
 
     seen: Dict[str, Any] = {}
 
-    def runner(argv: List[str], cwd: str, env: Dict[str, str]) -> int:
+    def runner(argv: List[str], cwd: str, env: Dict[str, str], timeout: int) -> int:
         seen["env"] = env
         _junitxml(argv).write_text(
             _report("".join(_case(name) for name in required_tests())), encoding="utf-8"
@@ -329,7 +329,7 @@ def test_what_the_tree_holds_is_read_before_the_run_it_would_report_on_starts(
 
     started: List[Any] = []
 
-    def runner(argv: List[str], cwd: str, env: Dict[str, str]) -> int:
+    def runner(argv: List[str], cwd: str, env: Dict[str, str], timeout: int) -> int:
         started.append(argv)
         return 0
 
@@ -450,7 +450,7 @@ def test_an_empty_marker_set_is_not_a_pass(monkeypatch: pytest.MonkeyPatch) -> N
     run has to write its report, or this passes on the missing file instead."""
     from scripts import check_semantic_report as checker
 
-    def runner(argv: List[str], cwd: str, env: Dict[str, str]) -> int:
+    def runner(argv: List[str], cwd: str, env: Dict[str, str], timeout: int) -> int:
         _junitxml(argv).write_text(_report(""), encoding="utf-8")
         return 0
 
@@ -519,13 +519,29 @@ def test_a_run_that_passed_every_test_and_still_exited_nonzero_is_not_proven(
     the report passed and pytest exits one. The report alone calls that proven."""
     from scripts.check_suite_report import check, required_tests
 
-    def runner(argv: List[str], cwd: str, env: Dict[str, str]) -> int:
+    def runner(argv: List[str], cwd: str, env: Dict[str, str], timeout: int) -> int:
         _junitxml(argv).write_text(
             _report("".join(_case(name) for name in required_tests())), encoding="utf-8"
         )
         return 1
 
     assert check(runner=runner) == ["pytest exited 1"]
+
+
+def test_a_run_that_never_finished_is_reported_rather_than_raised(
+    accepted_tree: None,
+) -> None:
+    """The deadline turns a hung suite into a failure. Raising past the caller
+    would lose that to a traceback, and the run is unproven either way."""
+    from scripts.check_suite_report import check
+
+    def runner(argv: List[str], cwd: str, env: Dict[str, str], timeout: int) -> int:
+        # The deadline handed over is the one reported; a shorter one would
+        # cut the run off while the message still named 900s.
+        assert timeout == SUBPROCESS_TIMEOUT_S, timeout
+        raise subprocess.TimeoutExpired(argv, timeout)
+
+    assert check(runner=runner) == ["the run did not finish within 900s"]
 
 
 def test_the_suite_checker_runs_the_whole_suite_under_the_coverage_floor() -> None:

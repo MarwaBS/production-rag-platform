@@ -15,13 +15,13 @@ generating freely and stripping unsupported content afterward.
 
 ## Why
 Prevention beats detection. Post-hoc removal of unsupported claims tends to break coherence,
-because the model may have woven them through the text. Constraining the prompt up front produces
-faithful output on the first pass and yields a clean audit trail of which evidence informed each
-section.
+because the model may have woven them through the text. Constraining the prompt up front bounds
+what the model can draw on, and yields a clean audit trail of which evidence informed each
+section. It does not verify the text that comes back.
 
 ## Trade-off
 Adds a retrieval step before each generation. The latency is small relative to the model call and
-is well worth the faithfulness guarantee.
+is well worth bounding what the model is given.
 
 In the full system a lightweight post-generation check runs behind this as a safety net. This
 repo ships no such check: what it enforces instead is that generation cannot proceed without
