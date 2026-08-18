@@ -9,6 +9,12 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege for every job that does not set its own block. docker sets
+# one, and a job block replaces this rather than adding to it, so it keeps the
+# packages: write it needs for the ghcr push.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
