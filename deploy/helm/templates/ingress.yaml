@@ -33,9 +33,25 @@ spec:
   rules:
     - host: {{ .Values.ingress.host }}
       http:
+        # The data plane plus /ready, which clients poll before /query. /health and
+        # /metrics stay in-cluster: the kubelet probes the pod, Prometheus scrapes it.
         paths:
-          - path: /
-            pathType: Prefix
+          - path: /index
+            pathType: Exact
+            backend:
+              service:
+                name: {{ .Release.Name }}
+                port:
+                  number: {{ .Values.service.port }}
+          - path: /ready
+            pathType: Exact
+            backend:
+              service:
+                name: {{ .Release.Name }}
+                port:
+                  number: {{ .Values.service.port }}
+          - path: /query
+            pathType: Exact
             backend:
               service:
                 name: {{ .Release.Name }}
