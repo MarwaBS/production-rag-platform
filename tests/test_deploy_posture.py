@@ -258,6 +258,17 @@ def test_the_ingress_is_disabled_by_default() -> None:
     assert _values()["ingress"]["enabled"] is False
 
 
+def test_the_ingress_publishes_only_the_client_routes() -> None:
+    """/metrics is unauthenticated by design for in-cluster scraping, so a
+    catch-all, by prefix or by default backend, would hand it to the internet."""
+    template = _template("ingress.yaml")
+    paths = re.findall(r"^\s*-\s*path:\s*(\S+)", template, flags=re.M)
+    kinds = set(re.findall(r"^\s*pathType:\s*(\S+)", template, flags=re.M))
+    assert paths == ["/index", "/ready", "/query"]
+    assert kinds == {"Exact"}
+    assert "defaultBackend" not in template
+
+
 def test_enabling_the_ingress_alone_cannot_publish_plaintext() -> None:
     """The chart must refuse the unsafe combination, not merely warn about it.
 
