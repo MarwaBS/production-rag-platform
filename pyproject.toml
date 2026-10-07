@@ -64,8 +64,8 @@ check_untyped_defs = true
 warn_unused_ignores = true
 
 # sentence-transformers is an optional extra the type-check environment does not
-# install. Scoped to it alone: rag-llm-infra ships py.typed from 0.2, so every
-# call into it is now checked.
+# install. Scoped to it alone: rag-llm-infra ships py.typed, so every
+# call into it is checked.
 [[tool.mypy.overrides]]
 module = ["sentence_transformers.*"]
 ignore_missing_imports = true
