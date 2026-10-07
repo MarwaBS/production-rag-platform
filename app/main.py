@@ -5,8 +5,8 @@ the infra library: typed config, structured logging, Prometheus metrics,
 liveness/readiness probes, and an index -> retrieve -> generate API. The corpus is
 held **in process** (one vector store per pod), so the reference deployment runs a
 single replica; see deploy/helm/values.yaml. Runs on the NumPy vector store + Mock
-LLM with no API key; set `APP_LLM_BACKEND=openai` + `OPENAI_API_KEY` for real
-generation.
+LLM with no API key; with the `openai` extra installed, set
+`APP_LLM_BACKEND=openai` and `OPENAI_API_KEY` for real generation.
 
     uvicorn app.main:app
 """
@@ -253,6 +253,7 @@ class _Breaker:
 
 
 _breaker = _Breaker()
+_breaker_lock = threading.Lock()
 
 
 def reset_llm_breaker() -> None:
@@ -284,10 +285,15 @@ def _invoke_with_timeout(llm: Any, messages: List[Dict[str, str]]) -> str:
 
 
 def _invoke_llm_bounded(llm: Any, messages: List[Dict[str, str]]) -> str:
-    if _breaker.opened_at is not None:
-        if time.monotonic() - _breaker.opened_at < settings.llm_breaker_reset_seconds:
-            raise _LLMUnavailable
-        # The reset window has passed: this call is the half-open probe.
+    with _breaker_lock:
+        if _breaker.opened_at is not None:
+            now = time.monotonic()
+            if now - _breaker.opened_at < settings.llm_breaker_reset_seconds:
+                raise _LLMUnavailable
+            # The reset window has passed: this call is the half-open probe.
+            # Restarting the window keeps every other caller refused while it
+            # runs, as long as the probe ends within the reset window.
+            _breaker.opened_at = now
     for _ in range(1 + settings.llm_retry_attempts):
         try:
             answer = _invoke_with_timeout(llm, messages)
