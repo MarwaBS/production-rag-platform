@@ -13,6 +13,7 @@ It is not fleet protection; there is no fleet.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -197,6 +198,47 @@ def test_the_breaker_closes_after_the_reset_window(llm, monkeypatch) -> None:
         "never let a request through again"
     )
     assert fake.calls > calls_when_open, "the recovered provider was never probed"
+
+
+def test_only_one_request_probes_a_half_open_breaker(llm, monkeypatch) -> None:
+    """While the probe is in flight the breaker still refuses, so a provider that
+    may still be down is called once per reset window, not once per request.
+
+    The probe is held inside the provider until the second request has been
+    answered, so the second request always arrives while the probe is in flight,
+    a few milliseconds after it claimed a 1 s window."""
+    monkeypatch.setattr(main.settings, "llm_breaker_reset_seconds", 1.0)
+    threshold = int(setting("llm_breaker_failures"))
+    fake = llm(fail=True)
+    for _ in range(threshold):
+        client.post("/query", json={"query": "vectors", "k": 1})
+    time.sleep(1.1)
+    in_provider, release = threading.Event(), threading.Event()
+
+    def held_answer(messages: list[dict[str, str]]) -> str:
+        fake.calls += 1
+        in_provider.set()
+        release.wait(5)
+        return "an answer"
+
+    monkeypatch.setattr(fake, "invoke", held_answer)
+    calls_when_open = fake.calls
+    probe: dict[str, int] = {}
+    worker = threading.Thread(
+        target=lambda: probe.update(
+            status=TestClient(app)
+            .post("/query", json={"query": "vectors", "k": 1})
+            .status_code
+        )
+    )
+    worker.start()
+    assert in_provider.wait(5), "the probe never reached the provider"
+    second = client.post("/query", json={"query": "vectors", "k": 1})
+    release.set()
+    worker.join()
+    assert probe["status"] == 200
+    assert second.status_code == 503
+    assert fake.calls == calls_when_open + 1
 
 
 def test_a_transient_failure_is_retried_and_succeeds(llm) -> None:
