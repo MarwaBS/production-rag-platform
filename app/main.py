@@ -5,8 +5,8 @@ the infra library: typed config, structured logging, Prometheus metrics,
 liveness/readiness probes, and an index -> retrieve -> generate API. The corpus is
 held **in process** (one vector store per pod), so the reference deployment runs a
 single replica; see deploy/helm/values.yaml. Runs on the NumPy vector store + Mock
-LLM with no API key; set `APP_LLM_BACKEND=openai` + `OPENAI_API_KEY` for real
-generation.
+LLM with no API key; with the `openai` extra installed, set
+`APP_LLM_BACKEND=openai` and `OPENAI_API_KEY` for real generation.
 
     uvicorn app.main:app
 """

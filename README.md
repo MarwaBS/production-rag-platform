@@ -56,7 +56,7 @@ curl -XPOST localhost:8000/query -d '{"query":"vector search","k":1}'           
 curl localhost:8000/health    # liveness  ·  /ready readiness (503 until indexed)  ·  /metrics Prometheus
 ```
 
-Runs on the NumPy vector store + Mock LLM with no API key. Set `APP_LLM_BACKEND=openai` + `OPENAI_API_KEY` for real generation.
+Runs on the NumPy vector store + Mock LLM with no API key. For real generation, `pip install '.[openai]'` and set `APP_LLM_BACKEND=openai` + `OPENAI_API_KEY`; the Docker image ships without that extra.
 
 ## What this reference service implements (in this repo)
 

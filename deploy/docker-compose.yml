@@ -1,5 +1,4 @@
 # Local stack; builds and runs the reference service. No secrets committed.
-# Set APP_LLM_BACKEND=openai + OPENAI_API_KEY (via a gitignored .env) for real generation.
 services:
   api:
     build:
